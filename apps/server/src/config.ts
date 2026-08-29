@@ -45,6 +45,31 @@ const envSchema = z.object({
     .url()
     .default("https://ark.cn-beijing.volces.com/api/v3"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+
+  // ---- AEGIS (Track C middleware) ----
+  AEGIS_VAULT_PATH: z.string().default(path.resolve("vault")),
+  /** Empty means "write the built-in profile into the data directory". */
+  AEGIS_SECCOMP_PROFILE: z.string().default(""),
+  /** "none", or the name of a user-defined `--internal` bridge network. */
+  AEGIS_NETWORK_MODE: z.string().min(1).default("aegis-egress"),
+  AEGIS_BROKER_URL: z.string().default("http://aegis-broker:8080"),
+  AEGIS_AGENT_BUDGET_USD: z.coerce.number().nonnegative().default(0.5),
+  AEGIS_TENANT_BUDGET_USD: z.coerce.number().nonnegative().default(5),
+  /** T7 - how much of each decision is written at all. */
+  AEGIS_CAPTURE_LEVEL: z.enum(["minimal", "standard", "full"]).default("standard"),
+  AEGIS_RETENTION_MAX_EVENTS: z.coerce.number().int().positive().default(5_000),
+  AEGIS_RETENTION_MAX_AGE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(7 * 24 * 60 * 60 * 1_000),
+  /** T6 - runaway execution. Steps are Codex items; 0 disables the cap. */
+  AEGIS_MAX_STEPS: z.coerce.number().int().nonnegative().default(120),
+  AEGIS_MAX_CONCURRENT_RUNS: z.coerce.number().int().positive().default(4),
+  AEGIS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;
@@ -88,6 +113,19 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
     nodeEnv: env.NODE_ENV,
+
+    aegisEnabled: env.AEGIS_ENABLED,
+    aegisCaptureLevel: env.AEGIS_CAPTURE_LEVEL,
+    aegisRetentionMaxEvents: env.AEGIS_RETENTION_MAX_EVENTS,
+    aegisRetentionMaxAgeMs: env.AEGIS_RETENTION_MAX_AGE_MS,
+    aegisMaxSteps: env.AEGIS_MAX_STEPS,
+    aegisMaxConcurrentRuns: env.AEGIS_MAX_CONCURRENT_RUNS,
+    aegisVaultPath: env.AEGIS_VAULT_PATH,
+    aegisSeccompProfile: env.AEGIS_SECCOMP_PROFILE,
+    aegisNetworkMode: env.AEGIS_NETWORK_MODE,
+    aegisBrokerUrl: env.AEGIS_BROKER_URL,
+    aegisAgentBudgetUsd: env.AEGIS_AGENT_BUDGET_USD,
+    aegisTenantBudgetUsd: env.AEGIS_TENANT_BUDGET_USD,
   };
 }
 
