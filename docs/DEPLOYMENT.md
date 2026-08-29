@@ -184,6 +184,24 @@ terraform -chdir=deploy/volcengine destroy
 > Destroying the stack removes the ECS instance, system disk, and Agent
 > workspaces. Back up required code first.
 
+## Middleware configuration
+
+The three middleware planes are on by default and configured entirely through
+environment variables, all listed with comments in `.env.example`:
+
+- `AEGIS_ENABLED` — set `false` to deploy the starter kit exactly as shipped.
+- `AEGIS_VAULT_PATH`, `AEGIS_NETWORK_MODE`, `AEGIS_SECCOMP_PROFILE` — the
+  protected asset and the runtime confinement profile.
+- `AEGIS_AGENT_BUDGET_USD`, `AEGIS_TENANT_BUDGET_USD`, `AEGIS_MAX_STEPS`,
+  `AEGIS_MAX_CONCURRENT_RUNS` — runaway-execution limits.
+- `AEGIS_CAPTURE_LEVEL`, `AEGIS_RETENTION_MAX_EVENTS`,
+  `AEGIS_RETENTION_MAX_AGE_MS` — how much of each decision is recorded, and for
+  how long.
+
+> The decision log records every human, Agent, action and resource. Treat
+> `*-audit.jsonl` in `APP_DATA_DIR` as sensitive, and set
+> `AEGIS_CAPTURE_LEVEL=minimal` on any deployment where that matters.
+
 ## Secret handling
 
 - Ark keys configure model access; Volcengine account AK/SK configures

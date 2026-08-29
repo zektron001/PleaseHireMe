@@ -2,17 +2,30 @@
 
 Volc Agent Launchpad is a single-node control plane for hackathon use.
 
+> **This fork adds three middleware planes.** The baseline below is unchanged and
+> still accurate; what sits on top of it is described in
+> [MASTER.md](MASTER.md) (start here), [WARRANT_TRACK_B.md](WARRANT_TRACK_B.md)
+> (the selected track), [CONCORD_SHARED_STATE.md](CONCORD_SHARED_STATE.md) and
+> [MIDDLEWARE_ARCHITECTURE.md](MIDDLEWARE_ARCHITECTURE.md).
+
 ```mermaid
 flowchart LR
     UI["React Web UI"] --> API["Fastify API"]
-    API --> Service["AgentService"]
+    API --> PDP["WARRANT PDP<br/><i>added</i>"]
+    PDP --> Service["AgentService"]
+    API --> DOCS["CONCORD<br/>shared documents<br/><i>added</i>"]
+    DOCS -.->|"authorised by"| PDP
     Service --> Store["JSON store"]
     Service --> Workspace["Agent workspace"]
-    Service --> Runner{"AgentRunner"}
+    Service --> PEP["AEGIS PEP<br/><i>added</i>"]
+    PEP --> Runner{"AgentRunner"}
     Runner -->|Local POC| Container["Disposable Runtime container"]
     Runner -->|ECS| Process["Codex child process"]
     Container --> Ark["Volcengine Ark"]
     Process --> Ark
+
+    classDef added fill:#0f766e,stroke:#134e4a,color:#ffffff
+    class PDP,DOCS,PEP added
 ```
 
 ## Components
@@ -70,13 +83,24 @@ the stored Codex thread, and escalate termination after a grace period.
 | ECS | Application container | Codex process in the same container |
 | Local development | Host Node.js | Host Codex process |
 
-## Extension seams
+## Extension seams — and what this fork did with them
 
-| Track | Primary seam | Expected change |
+| Track | Primary seam | Status in this repository |
 | --- | --- | --- |
-| Glass Box | `AgentRunner`, `AgentRun` | Emit and display correlated execution events. |
-| Bouncer | API routes, Agent ownership | Add identity and server-side authorization. |
-| Kill Switch | `AgentRunner` | Add threat-specific policy or a stronger sandbox. |
+| Glass Box | `AgentRunner`, `AgentRun` | **Not attempted.** A hash-chained decision log exists because containment must be provable, not as a tracing product. |
+| **Bouncer** | API routes, Agent ownership | **Built and selected.** `apps/server/src/warrant/` — see [WARRANT_TRACK_B.md](WARRANT_TRACK_B.md). |
+| Kill Switch | `AgentRunner` | **Built, retained, not claimed.** `apps/server/src/aegis/` — see [MIDDLEWARE_ARCHITECTURE.md](MIDDLEWARE_ARCHITECTURE.md). |
+
+Exactly one track is claimed, as the acceptance checklist requires: **B**.
+
+### How the seams were used
+
+- `RunnerRequest` gained an optional `inspect` hook, so AEGIS can evaluate the
+  Codex event stream without either runner knowing about the middleware.
+- `ContainerCodexRunner` gained a settable argv transform, applied at spawn time.
+- `runner-factory.ts` is the entire integration point: without an `Aegis` it
+  returns exactly the runner the starter kit shipped.
+- New planes are additive modules; `AEGIS_ENABLED=false` restores the baseline.
 
 The current container or ECS instance is the POC trust boundary. Ordinary
 containers are not hardened multi-tenant isolation.

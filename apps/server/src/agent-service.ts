@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import { ContainmentError } from "./aegis/index.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,
@@ -9,6 +10,7 @@ import type {
   AgentRunner,
   CreateAgentInput,
   Message,
+  RunSafety,
   UpdateAgentInput,
 } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -259,6 +261,8 @@ export class AgentService {
         storedRun.output = result.output;
         storedRun.usage = result.usage;
         storedRun.completedAt = completedAt;
+        const safety = this.runnerSafety(agentAtStart.id);
+        if (safety) storedRun.safety = safety;
         database.messages.push({
           id: randomUUID(),
           agentId: agent.id,
@@ -276,13 +280,37 @@ export class AgentService {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
       const message = error instanceof Error ? error.message : String(error);
+
+      // AEGIS: a containment outcome is not an ordinary failure. It gets its own
+      // terminal status so the UI can say WHICH control stopped the run, and a
+      // failed attestation escalates to `quarantined`.
+      const contained = error instanceof ContainmentError ? error : null;
+      const safety = contained ? this.runnerSafety(agentAtStart.id) : null;
+      const quarantined = safety?.attestation?.intact === false;
+      const runStatus = contained
+        ? quarantined
+          ? "quarantined"
+          : contained.outcome
+        : cancelled
+          ? "cancelled"
+          : "failed";
+
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
         if (storedRun) {
-          storedRun.status = cancelled ? "cancelled" : "failed";
+          storedRun.status = runStatus;
           storedRun.error = message;
           storedRun.completedAt = completedAt;
+          if (contained) {
+            storedRun.safety = {
+              verdict: contained.verdict,
+              attestation: safety?.attestation ?? null,
+              containmentMs: safety?.containmentMs ?? null,
+              costUsd: safety?.costUsd ?? null,
+              eventCount: safety?.eventCount ?? 0,
+            };
+          }
         }
         if (agent) {
           if (agent.status !== "stopped") {
@@ -293,6 +321,17 @@ export class AgentService {
         }
       });
     }
+  }
+
+  /**
+   * Reads the safety summary the AEGIS PEP recorded for this Agent's last run.
+   * Duck-typed so an unguarded runner needs no changes and returns null.
+   */
+  private runnerSafety(agentId: string): RunSafety | null {
+    const candidate = this.runner as { safetyFor?: (id: string) => RunSafety | null };
+    return typeof candidate.safetyFor === "function"
+      ? candidate.safetyFor(agentId)
+      : null;
   }
 
   private async setStatus(id: string, status: Agent["status"]): Promise<Agent> {

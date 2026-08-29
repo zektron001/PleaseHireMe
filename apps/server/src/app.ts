@@ -7,6 +7,11 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import type { AegisRouteDeps } from "./aegis/routes.js";
+import { registerAegisRoutes } from "./aegis/routes.js";
+import type { WarrantPlane } from "./warrant/index.js";
+import { registerWarrantRoutes } from "./warrant/routes.js";
+import { registerConcordRoutes } from "./concord/routes.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -26,6 +31,8 @@ const messageBody = z.object({
 export async function createApp(
   config: AppConfig,
   service: AgentService,
+  aegisDeps?: AegisRouteDeps,
+  warrantPlane?: WarrantPlane,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -47,7 +54,12 @@ export async function createApp(
       !config.authToken ||
       !request.url.startsWith("/api/") ||
       request.url === "/api/health" ||
-      request.url === "/api/auth"
+      request.url === "/api/auth" ||
+      // Track B routes carry a PER-HUMAN session token in this same header, and
+      // authenticate it themselves against the Registry. The shared demo token
+      // is not identity (it never was), so gating these on it would only break
+      // the stronger check without adding one.
+      request.url.startsWith("/api/warrant/")
     ) {
       return;
     }
@@ -127,6 +139,15 @@ export async function createApp(
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
   });
+
+  if (aegisDeps) {
+    await registerAegisRoutes(app, aegisDeps);
+  }
+
+  if (warrantPlane) {
+    await registerWarrantRoutes(app, warrantPlane);
+    await registerConcordRoutes(app, warrantPlane.docs);
+  }
 
   if (config.nodeEnv === "production") {
     const webRoot = fileURLToPath(new URL("../../web/dist", import.meta.url));

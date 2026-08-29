@@ -4,6 +4,16 @@ The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
 Only the Volcengine Ark model API is remote.
 
+## See the middleware without starting anything
+
+The Track B story runs in-process with no Ark key, no Docker and no server:
+
+```bash
+npm run demo:warrant
+```
+
+Use it to check the middleware works before spending time on the full POC.
+
 ## Start
 
 Requirements:
@@ -34,6 +44,11 @@ Set `LOCAL_POC_DATA_ROOT` to use another directory.
 Each turn mounts only the selected Agent workspace and Codex session directory.
 Default limits are 2 CPUs, 2 GiB memory, 256 processes, dropped capabilities,
 and `no-new-privileges`.
+
+With the middleware enabled (the default), a run additionally gets the hardened
+AEGIS profile and, for a fan-out subtask, only the one workspace its warrant
+names. Middleware settings live in `.env.example` under `AEGIS_*`; set
+`AEGIS_ENABLED=false` to run the starter kit exactly as shipped.
 
 Codex requests `workspace-write`. If the Linux kernel lacks Landlock, startup
 warns and disables only the inner Codex sandbox. The outer container limits
