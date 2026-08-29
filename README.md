@@ -1,4 +1,47 @@
-# Volc Agent Launchpad
+# Volc Agent Launchpad + WARRANT
+
+> ## Selected middleware track: **B — The Bouncer (Identity and Authorization)**
+>
+> This repository implements **exactly one** judged track. The middleware is
+> **WARRANT**: a delegation and authorization plane for multi-agent fan-out.
+>
+> One task is split into subtasks. Each subtask has **one accountable human** and
+> **one Agent acting for them** under a scoped, expiring, revocable *warrant*.
+> The backend decides every access; the browser decides none of them.
+>
+> | | |
+> |---|---|
+> | **Human principals** | `alice`, `bob` (mock, per section 8) plus an `orchestrator` |
+> | **Agent principals** | one per subtask, derived from a warrant, always narrower than its owner |
+> | **Protected resource** | each subtask workspace, plus the shared `branch:integration` |
+> | **Required denial** | Alice's Agent reading Bob's workspace → `WB-6.cross-owner-denied` |
+> | **Revocation** | an owner revokes a live warrant; the next action is refused, and no container is built |
+> | **Physical isolation** | only the warranted directory is bound; siblings exist at no path in the namespace |
+> | **Success test** | changing the user id in the request cannot bypass the decision |
+> | **Shared state** | many Agents edit one document concurrently; no lost updates ([CONCORD](docs/CONCORD_SHARED_STATE.md)) |
+>
+> ```bash
+> npm run demo:warrant   # the whole Track B story in your terminal, no Ark key needed
+> npm run check          # typecheck + 202 tests + build
+> ```
+>
+> **Team reference + roadmap:** [`docs/MASTER.md`](docs/MASTER.md) — start here.
+>
+> **Design:** [`docs/WARRANT_TRACK_B.md`](docs/WARRANT_TRACK_B.md) ·
+> **Threat model:** [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — the challenge's
+> second recommended example, with an honest implemented/partial/not-built status
+> against all seven threats.
+>
+> ### Also in this repository, and *not* our claimed track
+>
+> **AEGIS** (`apps/server/src/aegis/`) is safety and sandboxing work — Track C.
+> It is retained as defence in depth because fan-out makes workspace isolation a
+> real requirement, but **it is not what we are submitting**, and section 8
+> permits this: *"you may, but they do not compensate for an incomplete selected
+> track."* Judge us on Track B. Design:
+> [`docs/MIDDLEWARE_ARCHITECTURE.md`](docs/MIDDLEWARE_ARCHITECTURE.md).
+>
+> The baseline Create → Start → Chat journey is unchanged.
 
 A minimal Agent platform for three-day middleware hackathons. It provides Agent
 CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
@@ -8,9 +51,17 @@ Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
 
 > [!WARNING]
-> This is a single-user proof of concept. It intentionally has no identity,
-> tracing, audit, or hardened sandbox middleware. Do not use production data or
+> This is a single-user proof of concept. Do not use production data or
 > credentials. See [SECURITY.md](SECURITY.md).
+>
+> The upstream starter kit ships with **no** identity, tracing, audit, or hardened
+> sandbox middleware. This fork adds a **delegation and authorization plane**
+> (Track B, judged) and **sandbox hardening** (Track C, retained but not claimed).
+> Human principals are mock and unauthenticated by design — anyone who can reach
+> the server can open a session as `alice`. What is enforced is what an Agent may
+> do *once* a human has delegated to it. Limitations:
+> [Track B](docs/WARRANT_TRACK_B.md#8-limitations-and-what-we-would-do-next) ·
+> [Track C](docs/MIDDLEWARE_ARCHITECTURE.md#12-residual-risks-and-limitations).
 
 ## Screenshots
 
