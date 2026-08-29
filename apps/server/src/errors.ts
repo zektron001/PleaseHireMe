@@ -14,3 +14,11 @@ export class RunCancelledError extends Error {
     this.name = "RunCancelledError";
   }
 }
+
+/** Raised by a runner when AEGIS G3 aborted the run mid-stream. */
+export class PolicyAbortError extends Error {
+  constructor() {
+    super("Run aborted by policy");
+    this.name = "PolicyAbortError";
+  }
+}

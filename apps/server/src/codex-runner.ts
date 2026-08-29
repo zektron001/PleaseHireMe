@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
-import { RunCancelledError } from "./errors.js";
+import { PolicyAbortError, RunCancelledError } from "./errors.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -94,6 +94,7 @@ export class CodexRunner implements AgentRunner {
       cancelled: boolean;
       timedOut: boolean;
       outputExceeded: boolean;
+      policyAborted: boolean;
       settled: Promise<void>;
       forceKillTimer: NodeJS.Timeout | null;
     }
@@ -144,6 +145,7 @@ export class CodexRunner implements AgentRunner {
       cancelled: false,
       timedOut: false,
       outputExceeded: false,
+      policyAborted: false,
       settled,
       forceKillTimer: null as NodeJS.Timeout | null,
     };
@@ -172,6 +174,12 @@ export class CodexRunner implements AgentRunner {
         stdout = lines.pop() ?? "";
         for (const line of lines) {
           parseCodexEventLine(line, parsed);
+          // AEGIS G3 seam (see aegis/policy/extract.ts).
+          if (request.inspect && !request.inspect(line)) {
+            active.policyAborted = true;
+            this.terminate(active);
+            return;
+          }
         }
       } else {
         stderr += chunk.toString("utf8");
@@ -197,6 +205,9 @@ export class CodexRunner implements AgentRunner {
       });
       if (stdout.trim()) {
         parseCodexEventLine(stdout.trim(), parsed);
+      }
+      if (active.policyAborted) {
+        throw new PolicyAbortError();
       }
       if (active.cancelled) {
         throw new RunCancelledError();

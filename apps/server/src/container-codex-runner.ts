@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
-import { RunCancelledError } from "./errors.js";
+import { PolicyAbortError, RunCancelledError } from "./errors.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -18,6 +18,7 @@ interface ActiveContainer {
   cancelled: boolean;
   timedOut: boolean;
   outputExceeded: boolean;
+  policyAborted: boolean;
   settled: Promise<void>;
   termination: Promise<void> | null;
 }
@@ -88,10 +89,22 @@ export function buildContainerRunArgs(
   ];
 }
 
+/** G2 seam: rewrites the container argv immediately before spawn. */
+export type ArgvTransform = (args: string[], agentId: string) => string[];
+
 export class ContainerCodexRunner implements AgentRunner {
   private readonly active = new Map<string, ActiveContainer>();
+  private argvTransform: ArgvTransform | null = null;
 
   constructor(private readonly config: AppConfig) {}
+
+  /**
+   * Installed by AEGIS. Applied at spawn time rather than at construction so the
+   * transform can mint a per-run capability token (KS-7).
+   */
+  setArgvTransform(transform: ArgvTransform): void {
+    this.argvTransform = transform;
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -142,9 +155,14 @@ export class ContainerCodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Runtime container");
     }
 
+    const baselineArgs = buildContainerRunArgs(request, this.config);
+    const args = this.argvTransform
+      ? this.argvTransform(baselineArgs, request.agentId)
+      : baselineArgs;
+
     const child = spawn(
       this.config.containerEngine,
-      buildContainerRunArgs(request, this.config),
+      args,
       {
         cwd: request.workspacePath,
         env: this.childEnvironment(),
@@ -161,6 +179,7 @@ export class ContainerCodexRunner implements AgentRunner {
       cancelled: false,
       timedOut: false,
       outputExceeded: false,
+      policyAborted: false,
       settled,
       termination: null,
     };
@@ -187,7 +206,16 @@ export class ContainerCodexRunner implements AgentRunner {
         stdout += chunk.toString("utf8");
         const lines = stdout.split(/\r?\n/);
         stdout = lines.pop() ?? "";
-        for (const line of lines) parseCodexEventLine(line, parsed);
+        for (const line of lines) {
+          parseCodexEventLine(line, parsed);
+          // AEGIS G3: a denial reaps the container immediately, reusing the
+          // existing escalating reaper rather than adding a second kill path.
+          if (request.inspect && !request.inspect(line)) {
+            active.policyAborted = true;
+            void this.removeContainer(active);
+            return;
+          }
+        }
       } else {
         stderr += chunk.toString("utf8");
         if (stderr.length > 16_384) stderr = stderr.slice(-16_384);
@@ -209,6 +237,7 @@ export class ContainerCodexRunner implements AgentRunner {
         child.once("close", (code) => resolve(code ?? 1));
       });
       if (stdout.trim()) parseCodexEventLine(stdout.trim(), parsed);
+      if (active.policyAborted) throw new PolicyAbortError();
       if (active.cancelled) throw new RunCancelledError();
       if (active.timedOut) {
         throw new Error("Runtime timed out after " + this.config.codexTimeoutMs + " ms");

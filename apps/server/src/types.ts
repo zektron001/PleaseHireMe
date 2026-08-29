@@ -1,5 +1,18 @@
+import type { RunSafety } from "./aegis/types.js";
+
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  /** AEGIS G1 refused admission; no container was ever created. */
+  | "blocked"
+  /** AEGIS G3 detected a violation and force-removed the container. */
+  | "killed"
+  /** AEGIS G4 attestation failed; the workspace is frozen for inspection. */
+  | "quarantined";
 export type MessageRole = "user" | "assistant";
 
 export interface Agent {
@@ -41,7 +54,11 @@ export interface AgentRun {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  /** AEGIS evidence. Absent when the middleware is disabled. */
+  safety?: RunSafety;
 }
+
+export type { RunSafety } from "./aegis/types.js";
 
 export interface Database {
   version: 1;
@@ -73,6 +90,13 @@ export interface RunnerRequest {
   workspacePath: string;
   prompt: string;
   threadId: string | null;
+  /**
+   * AEGIS G3 seam. Called for every line of Codex JSON output. Returning false
+   * aborts the run: the runner force-removes the container and rejects with
+   * PolicyAbortError. Optional, so the baseline runners work unchanged without
+   * the middleware.
+   */
+  inspect?: (line: string) => boolean;
 }
 
 export interface AgentRunner {
