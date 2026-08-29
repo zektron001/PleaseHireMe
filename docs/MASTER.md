@@ -231,8 +231,9 @@ ARK_API_KEY=... ARK_MODEL=ep-... npm run poc
 | [CONCORD_SHARED_STATE.md](CONCORD_SHARED_STATE.md) | Shared concurrent state, races, merge | the CONCORD 3 |
 | [MIDDLEWARE_ARCHITECTURE.md](MIDDLEWARE_ARCHITECTURE.md) | AEGIS: layered architecture, gates, formal policy | the AEGIS 2 |
 | [THREAT_MODEL.md](THREAT_MODEL.md) | All seven threats, honest implemented/partial/not-built | everyone before the demo |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Starter-kit architecture *(original, not yet updated)* | reference |
-| [LOCAL_POC.md](LOCAL_POC.md) · [DEPLOYMENT.md](DEPLOYMENT.md) | Running and deploying *(original)* | whoever runs the POC |
+| [../SECURITY.md](../SECURITY.md) | What the fork adds, and what is still missing | everyone before the demo |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Starter-kit architecture, updated with the three planes | reference |
+| [LOCAL_POC.md](LOCAL_POC.md) · [DEPLOYMENT.md](DEPLOYMENT.md) | Running and deploying, incl. middleware config | whoever runs the POC |
 | [HACKATHON_EXTENSION_GUIDE.md](HACKATHON_EXTENSION_GUIDE.md) | The organizers' brief | everyone, once |
 | `hackathon-v2-section-*.xml` | The raw challenge spec | when arguing about rules |
 

@@ -16,7 +16,7 @@ honest status per control — **implemented**, **partial**, or **not built**.
 | --- | --- |
 | **Judged track** | B — The Bouncer. See [`WARRANT_TRACK_B.md`](WARRANT_TRACK_B.md). |
 | **Retained, not claimed** | C — Kill Switch. See [`MIDDLEWARE_ARCHITECTURE.md`](MIDDLEWARE_ARCHITECTURE.md). |
-| **Evidence** | `npm run check` — typecheck, 173 tests, build. |
+| **Evidence** | `npm run check` — typecheck, 202 tests, build. |
 
 ---
 
@@ -196,7 +196,7 @@ Statuses are deliberately conservative: **implemented** means there is a passing
 ## 7. What a reviewer should check
 
 ```bash
-npm run check          # typecheck + 173 tests + build
+npm run check          # typecheck + 202 tests + build
 npm run demo:warrant   # the delegation story, 9 beats, no Ark key needed
 ```
 
