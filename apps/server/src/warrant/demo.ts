@@ -282,7 +282,15 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------- 8
   beat("10", "EVIDENCE — every decision, in one verifiable chain");
-  const events = (await app.inject({ method: "GET", url: "/api/warrant/events" })).json();
+  // The chain is viewer-scoped, so the evidence beat reads it as the
+  // orchestrator - the one principal whose view is "all".
+  const events = (
+    await app.inject({
+      method: "GET",
+      url: "/api/warrant/events",
+      headers: { authorization: "Bearer " + orchestrator },
+    })
+  ).json();
   console.log(
     "   " + String(events.events.length) + " decisions recorded · chain " +
       (events.chainValid ? GREEN + "VALID" + OFF : RED + "BROKEN" + OFF) +
