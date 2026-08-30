@@ -47,7 +47,7 @@ import {
 } from "./Collab";
 import { Sessions } from "./Sessions";
 import { ExplorerView } from "./views/ExplorerView";
-import { RunView } from "./views/RunView";
+import { AgentsView } from "./views/AgentsView";
 import { AgentChat } from "./views/AgentChat";
 import { CreateAgentDialog } from "./views/CreateAgentDialog";
 import { useAgents } from "./state/useAgents";
@@ -82,7 +82,7 @@ type Panel =
   | "usage"
   | "access"
   | "scm"
-  | "run";
+  | "agents";
 
 /**
  * The activity bar. Codicon names, not emoji: these are the icons VS Code
@@ -140,9 +140,9 @@ const PANELS: { id: Panel; icon: string; label: string; key?: string }[] = [
   { id: "files", icon: "files", label: "Explorer", key: "ctrl+shift+e" },
   { id: "sessions", icon: "play-circle", label: "Sessions", key: "ctrl+shift+d" },
   { id: "scm", icon: "source-control", label: "Source Control", key: "ctrl+shift+g" },
-  { id: "run", icon: "debug-alt", label: "Run and Debug", key: "ctrl+shift+y" },
+  { id: "agents", icon: "organization", label: "Agents", key: "ctrl+shift+y" },
   { id: "comments", icon: "comment-discussion", label: "Comments" },
-  { id: "people", icon: "organization", label: "People" },
+  { id: "people", icon: "account", label: "People" },
   { id: "queue", icon: "list-ordered", label: "Queue" },
   { id: "subagents", icon: "type-hierarchy-sub", label: "Subagents" },
   { id: "usage", icon: "graph", label: "Usage" },
@@ -204,8 +204,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [asking, setAsking] = useState(false);
 
   // `enabled` keeps the workbench from polling /api/agents for someone who
-  // never opens Run and Debug.
-  const playground = useAgents(panel === "run" || view === "chat");
+  // never opens the Agents view.
+  const playground = useAgents(panel === "agents" || view === "chat");
 
 
   /**
@@ -765,7 +765,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const badge = (id: Panel): number | null => {
     if (id === "sessions") return board?.sessions.length ?? null;
     if (id === "scm") return openConflicts.length || null;
-    if (id === "run") return playground.agents.length || null;
+    if (id === "agents") return playground.agents.length || null;
     if (id === "files") return docs.length || null;
     if (id === "people") return board?.people.filter((p) => p.agents.length > 0).length ?? null;
     if (id === "queue") return board?.queue.length || null;
@@ -853,10 +853,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
         </div>
 
         <div className="sidebar-body">
-          {/* Run and Debug is the starter kit's own Agent model, which is gated
+          {/* Agents is the starter kit's own Agent model, which is gated
               by the shared token rather than a human session - so it is the one
               view that works signed out, and must not claim otherwise. */}
-          {!me && panel !== "run" && (
+          {!me && panel !== "agents" && (
             <p className="panel-empty">
               Sign in from the title bar. Every view here is scoped to the
               delegations you actually hold.
@@ -948,8 +948,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
               />
             )}
 
-            {panel === "run" && (
-              <RunView
+            {panel === "agents" && (
+              <AgentsView
                 agents={playground.agents}
                 selectedId={playground.selectedId}
                 system={playground.system}

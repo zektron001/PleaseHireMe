@@ -186,7 +186,7 @@ colours. The pieces Console composes:
 | `editor/CodeEditor.tsx` | Monaco (R18). Blame, comments, conflicts and carets are decorations in `editor/decorations.ts`. Owns no network call - saving is the `onRequestSave` prop |
 | `views/ExplorerView.tsx` | the file tree, derived from doc ids |
 | `views/SourceControlView.tsx` | CONCORD revisions as source control |
-| `views/RunView.tsx` + `AgentChat.tsx` + `CreateAgentDialog.tsx` | the starter kit's Agents, in the shell. Logic in `state/useAgents.ts`, moved verbatim from App.tsx |
+| `views/AgentsView.tsx` + `AgentChat.tsx` + `CreateAgentDialog.tsx` | the starter kit's Agents, in the shell. Logic in `state/useAgents.ts`, moved verbatim from App.tsx |
 
 The editor is **read-only until the human write path lands** - `CodeEditor` locks
 itself when no `onRequestSave` prop is passed, so nobody can type into a buffer

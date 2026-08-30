@@ -1,5 +1,5 @@
 /**
- * Run and Debug: the starter kit's Agents, in the shell instead of behind it.
+ * Agents: the starter kit's Agents, in the shell instead of behind it.
  *
  * The list, the Create button and the runtime card are the Playground's own,
  * re-parented into a side bar view. The chat moved to an editor tab, because
@@ -21,7 +21,7 @@ const STATUS_ICON: Record<Agent["status"], string> = {
   error: "error",
 };
 
-export function RunView({
+export function AgentsView({
   agents,
   selectedId,
   system,
