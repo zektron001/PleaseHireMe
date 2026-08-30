@@ -31,6 +31,7 @@ import type {
   Subtask,
 } from "./types";
 import { ReviewPanel } from "./Review";
+import { applyTheme, readChoice, watchSystem, type ThemeChoice } from "./theme";
 import "./console.css";
 
 const POLL_MS = 2000;
@@ -110,8 +111,18 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [review, setReview] = useState<ReviewState | null>(null);
   const [blame, setBlame] = useState<BlameView | null>(null);
   const [showBlame, setShowBlame] = useState(true);
+  const [theme, setTheme] = useState<ThemeChoice>(() => readChoice());
+  const [activity, setActivity] = useState<"docs" | "review" | "chain">("docs");
+  const [panelOpen, setPanelOpen] = useState(true);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [anchorLine, setAnchorLine] = useState<number | null>(null);
+
+  useEffect(() => {
+    applyTheme(theme);
+    // Only follow the OS while the choice actually is "follow the OS".
+    if (theme !== "system") return;
+    return watchSystem(() => applyTheme("system"));
+  }, [theme]);
 
   // Poll: documents, the chain, and the open document. Cheap, and it means two
   // browsers side by side show the same race the Agents are having.
@@ -226,9 +237,12 @@ export default function Console({ onExit }: { onExit: () => void }) {
   }, [chain, selected]);
 
   const openConflicts = doc?.conflicts ?? [];
+  const openReviewCount = (review?.comments ?? []).filter(
+    (comment) => comment.status !== "resolved" && comment.status !== "stale",
+  ).length;
 
   return (
-    <div className="console">
+    <div className="console ide">
       <div className="console-head">
         <div className="console-title">
           <h1>Concord</h1>
@@ -266,6 +280,17 @@ export default function Console({ onExit }: { onExit: () => void }) {
           ) : (
             <span>sign in to read the chain</span>
           )}
+          <button
+            className="theme-toggle"
+            title={"Theme: " + theme + " — click to cycle light / dark / system"}
+            onClick={() =>
+              setTheme((current) =>
+                current === "light" ? "dark" : current === "dark" ? "system" : "light",
+              )
+            }
+          >
+            {theme === "light" ? "☀ light" : theme === "dark" ? "☾ dark" : "◐ system"}
+          </button>
           <button className="button button-ghost" onClick={onExit}>
             Playground
           </button>
@@ -316,6 +341,38 @@ export default function Console({ onExit }: { onExit: () => void }) {
         })}
       </div>
 
+      <div className="ide-main">
+        <nav className="activitybar">
+          <button
+            className="activity-item"
+            data-active={activity === "docs"}
+            title="Shared documents"
+            onClick={() => setActivity("docs")}
+          >
+            🗎
+          </button>
+          <button
+            className="activity-item"
+            data-active={activity === "review"}
+            title="Review comments"
+            onClick={() => setActivity("review")}
+          >
+            ✎
+            {openReviewCount > 0 && (
+              <span className="activity-badge">{openReviewCount}</span>
+            )}
+          </button>
+          <button
+            className="activity-item"
+            data-active={activity === "chain"}
+            title="Decision chain"
+            onClick={() => setActivity("chain")}
+          >
+            ⛓
+          </button>
+          <span className="activity-spacer" />
+        </nav>
+
       <div className="console-body">
         <div className="rail">
           <div className="rail-label">
@@ -360,6 +417,32 @@ export default function Console({ onExit }: { onExit: () => void }) {
         </div>
 
         <div className="doc">
+          {docs.length > 0 && (
+            <div className="tabstrip">
+              {docs.map((entry) => (
+                <button
+                  key={entry.id}
+                  className="tab"
+                  data-active={entry.id === selected}
+                  onClick={() => setSelected(entry.id)}
+                  title={entry.id + " · v" + entry.version}
+                >
+                  <span
+                    className="tab-dot"
+                    data-state={
+                      entry.conflicts > 0
+                        ? "conflict"
+                        : entry.present.some((who) => who.activity === "editing")
+                          ? "editing"
+                          : "idle"
+                    }
+                  />
+                  {entry.id.split("/").at(-1)}
+                  <span className="chain-seq">v{entry.version}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {!doc && <p className="doc-empty">Select a document.</p>}
           {doc && selected && (
             <>
@@ -583,6 +666,65 @@ export default function Console({ onExit }: { onExit: () => void }) {
           ))}
         </div>
       </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-tabs">
+          <button
+            className="panel-tab"
+            data-active={true}
+            onClick={() => setPanelOpen((open) => !open)}
+          >
+            Decision chain
+          </button>
+          <span className="chain-seq">{chain?.events.length ?? 0}</span>
+          <span className="panel-spacer" />
+          <button className="panel-tab" onClick={() => setPanelOpen((open) => !open)}>
+            {panelOpen ? "collapse" : "expand"}
+          </button>
+        </div>
+        <div className="panel-body" data-open={panelOpen}>
+          {(chain?.events.length ?? 0) === 0 && (
+            <p className="stream-empty">
+              Sign in to read the chain. Every authorization and concurrency
+              outcome lands here.
+            </p>
+          )}
+          {chain?.events.map((event) => (
+            <div className="chain-row" key={event.eventId}>
+              <span className="chain-seq">{event.seq}</span>
+              <span className="chain-verdict" data-decision={event.verdict.decision}>
+                {event.verdict.decision}
+              </span>
+              <span className="chain-gate" title={event.gate}>
+                {event.verdict.ruleId}
+              </span>
+              <span className="chain-reason">{event.verdict.reason}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <footer className="statusbar">
+        <span>
+          {me ? <b>{me.displayName}</b> : "not signed in"}
+        </span>
+        <span>{selected ? <b>{selected}</b> : "no document"}</span>
+        {doc && <span>v{doc.version}</span>}
+        <span className={openConflicts.length > 0 ? "bad" : ""}>
+          {openConflicts.length} conflict{openConflicts.length === 1 ? "" : "s"}
+        </span>
+        <span className={openReviewCount > 0 ? "bad" : ""}>
+          {openReviewCount} open comment{openReviewCount === 1 ? "" : "s"}
+        </span>
+        <span className="statusbar-spacer" />
+        {chain && (
+          <span className={chain.chainValid ? "ok" : "bad"}>
+            chain {chain.chainValid ? "VALID" : "BROKEN"}
+          </span>
+        )}
+        <span>{docs.length} document{docs.length === 1 ? "" : "s"}</span>
+      </footer>
     </div>
   );
 }
