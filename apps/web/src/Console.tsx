@@ -376,15 +376,88 @@ export default function Console({ onExit }: { onExit: () => void }) {
       <div className="console-body">
         <div className="rail">
           <div className="rail-label">
-            <span>Shared documents</span>
-            <span>{docs.length}</span>
+            <span>
+              {activity === "docs"
+                ? "Shared documents"
+                : activity === "review"
+                  ? "Review comments"
+                  : "Recent decisions"}
+            </span>
+            <span>
+              {activity === "docs"
+                ? docs.length
+                : activity === "review"
+                  ? (review?.comments.length ?? 0)
+                  : (chain?.events.length ?? 0)}
+            </span>
           </div>
-          {docs.length === 0 && (
+
+          {activity === "review" && (
+            <>
+              {(review?.comments.length ?? 0) === 0 && (
+                <p className="stream-empty">
+                  No comments on this document yet. Select lines in the editor to
+                  leave one.
+                </p>
+              )}
+              {review?.comments.map((comment) => (
+                <button
+                  key={comment.id}
+                  className="doc-row"
+                  onClick={() => setSelection({
+                    start: comment.startLine,
+                    end: comment.endLine,
+                  })}
+                  title="Show the lines this comment is anchored to"
+                >
+                  <span className="doc-row-name">{comment.body}</span>
+                  <span className="doc-row-meta">
+                    <span>
+                      L{comment.startLine}
+                      {comment.endLine !== comment.startLine
+                        ? "\u2013" + comment.endLine
+                        : ""}
+                    </span>
+                    <span>{shortId(comment.responsibleAgentId)}</span>
+                    <span className={comment.status === "conflict" ? "conflicted" : ""}>
+                      {comment.status}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
+
+          {activity === "chain" && (
+            <>
+              {(chain?.events.length ?? 0) === 0 && (
+                <p className="stream-empty">
+                  Sign in to read the chain. Every authorization and concurrency
+                  outcome lands here.
+                </p>
+              )}
+              {chain?.events.slice(0, 40).map((event) => (
+                <div className="doc-row" key={event.eventId}>
+                  <span className="doc-row-name">{event.verdict.ruleId}</span>
+                  <span className="doc-row-meta">
+                    <span
+                      className={event.verdict.decision === "Deny" ? "conflicted" : ""}
+                    >
+                      {event.verdict.decision}
+                    </span>
+                    <span>{shortId(event.agentId)}</span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {activity === "docs" && docs.length === 0 && (
             <p className="stream-empty">
               None yet. Split a task with a shared path, then run an Agent.
             </p>
           )}
-          {docs.map((entry) => (
+          {activity === "docs" && docs.map((entry) => (
             <button
               key={entry.id}
               className="doc-row"
