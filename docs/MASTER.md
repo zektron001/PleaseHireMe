@@ -11,7 +11,7 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **358 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **403 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
 | **See it in a browser** | sidebar → **Middleware console** |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
@@ -175,6 +175,9 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | D16 | Review loop: comment, consult, re-iterate, resolve | CONCORD | 35 tests incl. 10 over real HTTP |
 | D17 | **Agent id is no longer a credential** | WARRANT | 12 tests. `/api/warrant/tasks` was anonymous and published Agent ids; CONCORD and review accepted one as their only identity. Closed at the HTTP boundary. |
 | D18 | Live collaboration plane: Agent Live (SSE), sessions, people, queue, usage, access | all | 17 tests, 2 over a real socket. Verified live against Ark: 12 real frames from one Codex turn. |
+| D19 | **Section ownership** — one Agent per slice of a file, enforced in the write path | CONCORD | 15 tests. `CD-section.outside` refuses before commit; canonical content never moves. |
+| D20 | Single-operator orchestration, human autosave, stop, auto mode, merge gate | all | 14 tests. Three Agents in parallel, rev 4, zero conflicts, live. |
+| D21 | Live per-Agent screens (Monaco) + five AEGIS precision fixes | AEGIS + web | Real workspace frames over SSE. Blocked turns went 2 → 0 across four live runs. |
 
 ### Open — claim a row
 
@@ -197,6 +200,8 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | **R14** | **Look at the console in a browser** | web | `@___` | `TODO` | 2026-08-31 | Still nobody's eyes on it - now more urgent, because there is far more of it. Every module compiles, builds and is served by Vite, and every route behind it is live-verified, but no human has seen the layout. **Do this before demoing.** Was the second half of R7. |
 | **R15** | **Live Ark run of the review loop** *(see R12)* | CONCORD | `@___` | `TODO` | 2026-08-31 | Narrowed: the TURN path is now live-verified end to end including the activity feed. What is still stubbed is a real model answering a consultation or revising through re-iteration. |
 | **R16** | **AEGIS hardened profile with the live feed attached** | AEGIS | `@___` | `TODO` | 2026-08-31 | The tap sits behind the guarded runner's own `inspect` and its return value is ignored, so a hardened run should be unaffected. Not measured. AEGIS owner's call. |
+| **R17** | **G3 should not kill a run on a heuristic** | AEGIS | `@___` | `TODO` | 2026-08-31 | **The one that matters.** `fs.read` requests are derived by scanning shell TEXT, and that is enough to contain a run. Shell text cannot be parsed reliably: five distinct false positives killed legitimate turns (globs, heredoc bodies, escaped slashes, relative paths, wedged quotes) - all fixed, but the class is open. Suggested shape: RECORD heuristic extractions, and reserve containment for `file_change` events, which Codex reports structurally. Policy design change - AEGIS owner's call. See [MULTI_AGENT_V2.md](MULTI_AGENT_V2.md) §6. |
+| **R18** | **Flaky AEGIS test** | AEGIS | `@___` | `TODO` | 2026-08-31 | `guarded-runner.test.ts` fails ~1 full run in 8 (`KS-9 global kill switch`, or the breakers) and passes in isolation every time. The latch and breakers are process-global while the tests share one temp `dir`, so ordering leaks. Pre-existing. |
 
 ### Priority if time runs short
 
@@ -218,7 +223,7 @@ concrete fixes are in the changelog; neither looks large.
 ```bash
 npm install
 
-# Everything: typecheck + 358 tests + build. This must stay green.
+# Everything: typecheck + 403 tests + build. This must stay green.
 npm run check
 
 # The Track B story in the terminal — no Ark key, no Docker needed.
@@ -255,6 +260,7 @@ ARK_API_KEY=... ARK_MODEL=ep-... npm run poc
 | [CONCORD_SHARED_STATE.md](CONCORD_SHARED_STATE.md) | Shared concurrent state, races, merge | the CONCORD 3 |
 | [CONCORD_REVIEW_LOOP.md](CONCORD_REVIEW_LOOP.md) | Provenance, comments, consultation, re-iteration | the CONCORD 3 |
 | [AMOEBA_INSPIRATION_SCOPE.md](AMOEBA_INSPIRATION_SCOPE.md) | The multiplayer-IDE reel: what we took, adapted and refused, and what is verified | everyone before the demo |
+| [MULTI_AGENT_V2.md](MULTI_AGENT_V2.md) | Section ownership, human editing, live screens, and the five AEGIS false positives | everyone before the demo |
 | [MIDDLEWARE_ARCHITECTURE.md](MIDDLEWARE_ARCHITECTURE.md) | AEGIS: layered architecture, gates, formal policy | the AEGIS 2 |
 | [THREAT_MODEL.md](THREAT_MODEL.md) | All seven threats, honest implemented/partial/not-built | everyone before the demo |
 | [../SECURITY.md](../SECURITY.md) | What the fork adds, and what is still missing | everyone before the demo |
@@ -272,7 +278,7 @@ Fitting, given what we are building:
 1. **One person per module at a time.** If two of you must touch `store.ts`, say so in the
    team chat first. We built a whole middleware about this problem; let us not demonstrate it
    on ourselves.
-2. **`npm run check` must be green before you push.** 358 tests. If you break one, fix it or
+2. **`npm run check` must be green before you push.** 403 tests. If you break one, fix it or
    revert — do not leave it red for someone else to find at 2am.
 3. **Every new control needs a positive *and* a negative test.** The negative one is the
    point. "It allows the good case" proves nothing about a security control.
@@ -305,6 +311,7 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
+- `2026-08-31` · `@jemy` · **v2: one file, many Agents (D19-D21).** The UX was the problem - two mock humans and a "run anyway" button explained nothing. Now: **one operator**, the orchestrator splits a goal and allocates each Agent ONE SECTION of the file, and CONCORD refuses a write outside it (`CD-section.outside`) - so "they do not collide" is enforced rather than hoped for. The human owns the whole file and edits it directly in **Monaco**, autosaving through CONCORD as an attributed revision. Per-Agent cards carry model, section and token cost; run / stop / auto mode; a merge gate that opens only when every Agent is approved and nothing is contested. **Live screens**: one pane per Agent showing its real workspace copy as it changes on disk, with its allocated band lit and everything else dimmed. Consulting an Agent is now confirm-yes/no, from provenance, instead of typing an id. 403 tests. **Verified live: three Agents in parallel, rev 4, zero conflicts.** Also five AEGIS precision fixes - every local turn was dying because `WORKSPACE_MOUNT` is a container path and `local-process` Agents name host paths; plus globs, heredoc bodies, escaped slashes and relative paths all read as escape attempts. The structural issue behind them is R17 and is the AEGIS owner's call. Full write-up: [MULTI_AGENT_V2.md](MULTI_AGENT_V2.md).
 - `2026-08-31` · `@jemy` · **Live collaboration plane landed (D18), and an authorization hole closed (D17).** The hole first: `/api/warrant/tasks` was anonymous and hands out `agentId`s, and CONCORD/review accepted a bare `agentId` as their only identity - so two GETs and a POST let a stranger write another human's shared documents, with `APP_AUTH_TOKEN` set or not. An Agent id is now a *selector* for one of your own delegations, checked against the session (`warrant/access.ts`). Then the reel features: **Agent Live** streams the runtime's own Codex event feed over SSE, tapped where AEGIS already inspects it, so every row is something that really happened; plus sessions dashboard, people, queue, usage, an access sheet that renders warrant scopes as roles, participant colours, syntax-coloured blame gutter, and a Problems panel. 358 tests. **Verified live against Ark: 12 real frames from one turn, correctly scoped.** Two bugs found by running it, not by tests - the stream captured the viewer's scope at connect time, and Node held the SSE headers until the first write. Both fixed with regression tests over a real socket. Refused on purpose: live cursors and typing animation (the runtime reports items, not keystrokes). Full write-up: [AMOEBA_INSPIRATION_SCOPE.md](AMOEBA_INSPIRATION_SCOPE.md).
 - `2026-08-30` · `@jemy` · **R11 premise re-measured.** A container on an `--internal` network *can* reach a host process, if that process binds the network's own bridge gateway rather than `0.0.0.0` or docker0 - internet still `ENETUNREACH` from the same container. If it reproduces, the dual-homed sidecar is unnecessary. Left R11 open: the AEGIS owner's call, not mine.
 - `2026-08-30` · `@jemy` · **Review loop landed (D16).** A reviewer selects lines, CONCORD provenance says which Agent wrote them, and the comment is routed there. Consultation is explanation-only *structurally* - it never reconciles, so a hostile Agent that rewrites the file during one changes nothing (test at the HTTP boundary proves it). Re-iteration returns through `store.write()`, so merge/conflict/denied are unchanged. Comments become `addressed`, never `resolved`: only a human resolves. 324 tests. **Not yet run against a live Ark model - see R12.**
