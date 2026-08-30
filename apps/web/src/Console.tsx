@@ -47,6 +47,10 @@ import {
 } from "./Collab";
 import { Sessions } from "./Sessions";
 import { ExplorerView } from "./views/ExplorerView";
+import { RunView } from "./views/RunView";
+import { AgentChat } from "./views/AgentChat";
+import { CreateAgentDialog } from "./views/CreateAgentDialog";
+import { useAgents } from "./state/useAgents";
 import { SourceControlView } from "./views/SourceControlView";
 import { clockOf, colorOf, humanName, initialsOf, shortId } from "./participants";
 import {
@@ -77,7 +81,8 @@ type Panel =
   | "subagents"
   | "usage"
   | "access"
-  | "scm";
+  | "scm"
+  | "run";
 
 /**
  * The activity bar. Codicon names, not emoji: these are the icons VS Code
@@ -135,6 +140,7 @@ const PANELS: { id: Panel; icon: string; label: string; key?: string }[] = [
   { id: "files", icon: "files", label: "Explorer", key: "ctrl+shift+e" },
   { id: "sessions", icon: "play-circle", label: "Sessions", key: "ctrl+shift+d" },
   { id: "scm", icon: "source-control", label: "Source Control", key: "ctrl+shift+g" },
+  { id: "run", icon: "debug-alt", label: "Run and Debug", key: "ctrl+shift+y" },
   { id: "comments", icon: "comment-discussion", label: "Comments" },
   { id: "people", icon: "organization", label: "People" },
   { id: "queue", icon: "list-ordered", label: "Queue" },
@@ -176,7 +182,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [live, setLive] = useState<ActivityEvent[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [session, setSession] = useState<string | null>(null);
-  const [view, setView] = useState<"dashboard" | "workspace">("dashboard");
+  const [view, setView] = useState<"dashboard" | "workspace" | "chat">("dashboard");
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   const [review, setReview] = useState<ReviewState | null>(null);
   const [blame, setBlame] = useState<BlameView | null>(null);
@@ -195,6 +202,11 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [question, setQuestion] = useState("");
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [asking, setAsking] = useState(false);
+
+  // `enabled` keeps the workbench from polling /api/agents for someone who
+  // never opens Run and Debug.
+  const playground = useAgents(panel === "run" || view === "chat");
+
 
   /**
    * Reading a document needs an Agent, because the warrant - not the human
@@ -585,8 +597,28 @@ export default function Console({ onExit }: { onExit: () => void }) {
         run: () => setView("dashboard"),
       },
       {
+        id: "agents.create",
+        title: "Create Agent",
+        category: "Agent",
+        run: () => setShowCreateAgent(true),
+      },
+      {
+        id: "agents.chat",
+        title: "Open Agent Chat",
+        category: "Agent",
+        enabled: playground.selectedId !== null,
+        run: () => setView("chat"),
+      },
+      {
+        id: "agents.toggle",
+        title: "Start / Stop Agent",
+        category: "Agent",
+        enabled: playground.selected !== null,
+        run: () => void playground.toggleAgent(),
+      },
+      {
         id: "workbench.playground",
-        title: "Open the Agent Playground",
+        title: "Open the Classic Playground",
         category: "Go",
         run: onExit,
       },
@@ -606,7 +638,19 @@ export default function Console({ onExit }: { onExit: () => void }) {
     // `runSubtask` is re-created every render, so listing it here would rebuild
     // the array every render and re-subscribe the key listener with it. What it
     // actually closes over is `shared`, which is listed instead.
-  }, [selected, openTabs, showBlame, doc, me, task, busy, shared, onExit]);
+  }, [
+    selected,
+    openTabs,
+    showBlame,
+    doc,
+    me,
+    task,
+    busy,
+    shared,
+    onExit,
+    playground.selectedId,
+    playground.selected,
+  ]);
 
   // One listener for the whole workbench. preventDefault only on a real match,
   // so Ctrl+C and friends still belong to the browser.
@@ -710,7 +754,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
       { label: "File", items: pick("workbench.quickOpen", "workbench.closeEditor") },
       { label: "View", items: pick("workbench.showCommands", "workbench.toggleSidebar", "workbench.togglePanel", "view.problems", "view.agentLive") },
       { label: "Go", items: pick("workbench.quickOpen", "workbench.sessions", "workbench.playground") },
-      { label: "Agent", items: pick("warrant.plan", "concord.toggleBlame") },
+      {
+        label: "Agent",
+        items: pick("agents.create", "agents.chat", "agents.toggle", "warrant.plan", "concord.toggleBlame"),
+      },
       { label: "Preferences", items: pick("workbench.selectTheme") },
     ];
   }, [commands]);
@@ -718,6 +765,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const badge = (id: Panel): number | null => {
     if (id === "sessions") return board?.sessions.length ?? null;
     if (id === "scm") return openConflicts.length || null;
+    if (id === "run") return playground.agents.length || null;
     if (id === "files") return docs.length || null;
     if (id === "people") return board?.people.filter((p) => p.agents.length > 0).length ?? null;
     if (id === "queue") return board?.queue.length || null;
@@ -763,7 +811,16 @@ export default function Console({ onExit }: { onExit: () => void }) {
         onClose={() => setPalette((current) => ({ ...current, open: false }))}
       />
 
-      {error && <div className="console-error">{error}</div>}
+      <CreateAgentDialog
+        open={showCreateAgent}
+        busy={playground.busy}
+        onCreate={playground.createAgent}
+        onClose={() => setShowCreateAgent(false)}
+      />
+
+      {(error || playground.error) && (
+        <div className="console-error">{error ?? playground.error}</div>
+      )}
 
       <nav className="activitybar">
         {PANELS.map((entry) => {
@@ -796,7 +853,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
         </div>
 
         <div className="sidebar-body">
-          {!me && (
+          {/* Run and Debug is the starter kit's own Agent model, which is gated
+              by the shared token rather than a human session - so it is the one
+              view that works signed out, and must not claim otherwise. */}
+          {!me && panel !== "run" && (
             <p className="panel-empty">
               Sign in from the title bar. Every view here is scoped to the
               delegations you actually hold.
@@ -888,6 +948,22 @@ export default function Console({ onExit }: { onExit: () => void }) {
               />
             )}
 
+            {panel === "run" && (
+              <RunView
+                agents={playground.agents}
+                selectedId={playground.selectedId}
+                system={playground.system}
+                busy={playground.busy}
+                onSelect={(id) => {
+                  playground.setSelectedId(id);
+                  setView("chat");
+                }}
+                onCreate={() => setShowCreateAgent(true)}
+                onToggle={() => void playground.toggleAgent()}
+                onDelete={() => void playground.deleteAgent()}
+              />
+            )}
+
             {me && panel === "scm" && (
               <SourceControlView
                 docId={selected}
@@ -973,7 +1049,24 @@ export default function Console({ onExit }: { onExit: () => void }) {
 
       <main className="editor-area">
           <div className="doc">
-            {view === "dashboard" ? (
+            {view === "chat" ? (
+              playground.selected ? (
+                <AgentChat
+                  agent={playground.selected}
+                  messages={playground.messages}
+                  activeRun={playground.activeRun}
+                  system={playground.system}
+                  onSend={playground.sendMessage}
+                />
+              ) : (
+                <div className="editor-empty">
+                  <p>No Agent selected.</p>
+                  <p>
+                    Create one from Run and Debug, or press <kbd>Ctrl+Shift+P</kbd>.
+                  </p>
+                </div>
+              )
+            ) : view === "dashboard" ? (
               <Sessions
                 sessions={board?.sessions ?? []}
                 activeId={session}
