@@ -192,7 +192,7 @@ re-checked. Covered by a test at the HTTP boundary.
 
 ## Verified vs not
 
-**Deterministically verified** (324 tests, including 10 over real HTTP with the
+**Deterministically verified** (358 tests overall, including 10 over real HTTP with the
 real WARRANT PDP and CONCORD store): provenance reconciliation and its
 invariant; attribution across merges; blame gating; checkpoint parsing and its
 arrival in the log; server-derived anchors; staleness holding; ambiguity
@@ -217,7 +217,7 @@ not been reviewed in a browser.
 
 ```bash
 npm install
-npm run check     # typecheck + 324 tests + build
+npm run check     # typecheck + 358 tests + build
 npx vitest run src/review --root apps/server        # the review loop
 npx vitest run src/concord --root apps/server       # provenance and blame
 ```

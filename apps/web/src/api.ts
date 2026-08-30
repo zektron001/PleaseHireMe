@@ -1,5 +1,6 @@
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type { ActivityEvent, Agent, AgentRun, Consultation, Message, SystemInfo } from "./types";
 import type {
+  AccessWarrant,
   AgentRouting,
   BlameView,
   ChainView,
@@ -10,6 +11,7 @@ import type {
   PlannedTask,
   ReiterationRun,
   ReviewComment,
+  LiveBoard,
   ReviewState,
   RunReport,
 } from "./types";
@@ -129,8 +131,8 @@ export const api = {
       "/api/warrant/session",
       json({ handle }),
     ),
-  tasks: () => request<{ tasks: PlannedTask["task"][] }>("/api/warrant/tasks"),
-  task: (id: string) => request<PlannedTask>("/api/warrant/tasks/" + id),
+  tasks: () => asHuman<{ tasks: PlannedTask["task"][] }>("/api/warrant/tasks"),
+  task: (id: string) => asHuman<PlannedTask>("/api/warrant/tasks/" + id),
   plan: (body: {
     title: string;
     owners: string[];
@@ -147,17 +149,19 @@ export const api = {
   events: () => asHuman<ChainView>("/api/warrant/events"),
 
   // ------------------------------------------------------------- CONCORD
+  // Every CONCORD call is asHuman now: an agentId selects one of the caller's
+  // own delegations, it does not authenticate. See warrant/access.ts.
   docs: (agentId: string) =>
-    request<{ docs: ConcordDoc[] }>("/api/concord/docs?agentId=" + encodeURIComponent(agentId)),
+    asHuman<{ docs: ConcordDoc[] }>("/api/concord/docs?agentId=" + encodeURIComponent(agentId)),
   doc: (docId: string, agentId: string) =>
-    request<DocView>(
+    asHuman<DocView>(
       "/api/concord/docs/" +
         encodeURIComponent(docId) +
         "?agentId=" +
         encodeURIComponent(agentId),
     ),
   docHistory: (docId: string, agentId: string) =>
-    request<{ history: DocView["history"] }>(
+    asHuman<{ history: DocView["history"] }>(
       "/api/concord/docs/" +
         encodeURIComponent(docId) +
         "/history?agentId=" +
@@ -207,7 +211,7 @@ export const api = {
       { method: "POST" },
     ),
   blame: (docId: string, agentId: string) =>
-    request<BlameView>(
+    asHuman<BlameView>(
       "/api/concord/docs/" +
         encodeURIComponent(docId) +
         "/blame?agentId=" +
@@ -215,4 +219,47 @@ export const api = {
     ),
   reiterate: (commentIds: string[]) =>
     asHuman<{ runs: ReiterationRun[] }>("/api/review/reiterations", json({ commentIds })),
+
+  consult: (body: {
+    docId: string;
+    agentId: string;
+    startLine: number;
+    endLine: number;
+    question: string;
+    targetAgentId?: string;
+  }) =>
+    asHuman<{ consultation: Consultation }>("/api/review/consultations", json(body)),
+  consultations: (docId: string) =>
+    asHuman<{ consultations: Consultation[] }>(
+      "/api/review/docs/" + encodeURIComponent(docId) + "/consultations",
+    ),
+
+  // ------------------------------------------------------- live plane
+  board: () => asHuman<LiveBoard>("/api/live/board"),
+  access: () =>
+    asHuman<{ viewer: string; warrants: AccessWarrant[] }>("/api/live/access"),
+  /**
+   * The push half of the live board. The board poll above is the fallback and
+   * remains sufficient on its own - this only makes it immediate.
+   *
+   * EventSource cannot carry an Authorization header, so the session token
+   * travels in the query string. That is a real trade: it lands in server logs
+   * where a header would not. Acceptable here because the token is a short
+   * demo session, and the alternative is a WebSocket dependency for one
+   * one-way stream.
+   */
+  stream: (onEvent: (event: ActivityEvent) => void): (() => void) => {
+    if (!sessionToken) return () => {};
+    const source = new EventSource(
+      "/api/live/stream?token=" + encodeURIComponent(sessionToken),
+    );
+    source.onmessage = (message) => {
+      try {
+        onEvent(JSON.parse(message.data) as ActivityEvent);
+      } catch {
+        // A malformed frame is dropped rather than breaking the stream.
+      }
+    };
+    return () => source.close();
+  },
 };

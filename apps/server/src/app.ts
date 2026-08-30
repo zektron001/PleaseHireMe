@@ -15,6 +15,7 @@ import type { WarrantPlane } from "./warrant/index.js";
 import { registerWarrantRoutes } from "./warrant/routes.js";
 import { registerConcordRoutes } from "./concord/routes.js";
 import { registerReviewRoutes } from "./review/routes.js";
+import { registerLiveRoutes } from "./live/routes.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -60,22 +61,21 @@ export async function createApp(
       !request.url.startsWith("/api/") ||
       request.url === "/api/health" ||
       request.url === "/api/auth" ||
-      // Track B routes carry a PER-HUMAN session token in this same header, and
-      // authenticate it themselves against the Registry. The shared demo token
-      // is not identity (it never was), so gating these on it would only break
-      // the stronger check without adding one.
+      // The middleware routes carry a PER-HUMAN session token in this same
+      // header and authenticate it themselves against the Registry. One
+      // Authorization header cannot carry the shared demo token AND the
+      // identity that actually decides the request, so gating these on the
+      // shared token would reject the stronger check rather than add to it.
+      //
+      // This exemption is only safe because every route behind it now requires
+      // that session. It did not use to be: CONCORD and review accepted a bare
+      // `agentId`, and `/api/warrant/tasks/:id` published Agent ids to
+      // anonymous callers, so a stranger could write another human's shared
+      // documents with APP_AUTH_TOKEN set. See warrant/access.ts.
       request.url.startsWith("/api/warrant/") ||
-      // CONCORD is the same argument. Every route here resolves either a
-      // warrant-bound agentId through the PDP or a per-human session token;
-      // one Authorization header cannot carry the shared token AND the
-      // identity that actually decides the request.
       request.url.startsWith("/api/concord/") ||
-      // The review routes are the same argument again: each resolves a
-      // per-human session token through the Registry, or a warrant-bound
-      // agentId through the PDP. Gating them on the shared demo token would
-      // reject the stronger identity, because one Authorization header cannot
-      // carry both.
-      request.url.startsWith("/api/review/")
+      request.url.startsWith("/api/review/") ||
+      request.url.startsWith("/api/live/")
     ) {
       return;
     }
@@ -163,12 +163,13 @@ export async function createApp(
   if (warrantPlane) {
     await registerWarrantRoutes(app, warrantPlane, runner);
     await registerConcordRoutes(app, warrantPlane);
-    await registerReviewRoutes(
+    const review = await registerReviewRoutes(
       app,
       warrantPlane,
       runner ?? null,
       path.join(config.dataDirectory, "review-state.json"),
     );
+    await registerLiveRoutes(app, { plane: warrantPlane, review });
   }
 
   if (config.nodeEnv === "production") {

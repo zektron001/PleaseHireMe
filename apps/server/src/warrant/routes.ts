@@ -16,12 +16,14 @@ import type { AgentRunner } from "../types.js";
 import { z } from "zod";
 import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "./index.js";
+import type { HumanPrincipal } from "./types.js";
 import { workspaceResource } from "./resources.js";
 import {
   parseCheckpoint,
   withCheckpointInstruction,
 } from "../concord/checkpoint.js";
 import { WarrantBindingError } from "./binding.js";
+import { activityBus } from "../live/activity.js";
 
 const loginBody = z.object({ handle: z.string().trim().min(1).max(40) });
 
@@ -105,14 +107,39 @@ export async function registerWarrantRoutes(
     return reply.code(201).send(result);
   });
 
-  app.get("/api/warrant/tasks", async () => ({
-    tasks: plane.orchestrator.listTasks(),
-  }));
+  /**
+   * Scoped, and that matters more than it looks. A task carries the Agent ids
+   * of every subtask, and CONCORD selects an Agent by id. Serving this
+   * anonymously - which it used to - published the selector for every shared
+   * document on the platform. It is now a participant-only view, and the id it
+   * hands you is useless without the session of the human who delegated it.
+   */
+  const participates = (human: HumanPrincipal, taskId: string): boolean =>
+    human.id === ORCHESTRATOR_ID ||
+    plane.orchestrator.task(taskId)?.createdBy === human.id ||
+    plane.orchestrator.subtasksOf(taskId).some((s) => s.ownerId === human.id);
+
+  app.get("/api/warrant/tasks", async (request) => {
+    const human = requireHuman(request);
+    return {
+      viewer: human.id,
+      tasks: plane.orchestrator
+        .listTasks()
+        .filter((task) => participates(human, task.id)),
+    };
+  });
 
   app.get("/api/warrant/tasks/:taskId", async (request) => {
+    const human = requireHuman(request);
     const { taskId } = taskParams.parse(request.params);
     const task = plane.orchestrator.task(taskId);
-    if (!task) throw new HttpError(404, "Task not found");
+    // Same 404 either way: "you may not see it" and "it does not exist" must
+    // not be distinguishable, or this becomes a task-id oracle.
+    if (!task || !participates(human, taskId)) {
+      throw new HttpError(404, "Task not found");
+    }
+    // Collaborators ARE visible to each other - that is the product - but see
+    // the note above: the ids are selectors, not credentials.
     return { task, subtasks: plane.orchestrator.subtasksOf(taskId) };
   });
 
@@ -218,8 +245,23 @@ export async function registerWarrantRoutes(
     );
 
     plane.orchestrator.setState(subtaskId, "in_progress");
+    /**
+     * The live board taps the same Codex event stream AEGIS already inspects.
+     * `body.prompt` is the human's own words, not the compiled prompt, and it
+     * is truncated on the way in - so "what is Alice asking her Agent" is
+     * answerable without publishing anything the Agent was actually sent.
+     */
+    const watch = activityBus.watch({
+      agentId: subtask.agentId,
+      subtaskId,
+      humanId: human.id,
+      purpose: "turn",
+      prompt: body.prompt,
+      model: bound.model,
+    });
     try {
-      const result = await runner.run(bound.request);
+      const result = await runner.run({ ...bound.request, inspect: watch.inspect });
+      watch.finish(result.usage);
       const checkpoint = parseCheckpoint(result.output);
       const reconciled = await plane.reconciler.reconcile(
         workspacePath,
@@ -247,6 +289,7 @@ export async function registerWarrantRoutes(
       });
     } catch (error) {
       plane.orchestrator.setState(subtaskId, "assigned");
+      watch.fail(error instanceof Error ? error.message : String(error));
       // A failed turn may still have left edits on disk. Reconciling anyway is
       // the safe direction: the alternative is silently dropping work that the
       // Agent did before it fell over.
@@ -326,7 +369,11 @@ export async function registerWarrantRoutes(
   });
 
   // ---------------------------------------------------------- evidence
-  app.get("/api/warrant/status", async () => plane.status());
+  /** The platform's whole delegation graph. Signed-in readers only. */
+  app.get("/api/warrant/status", async (request) => {
+    requireHuman(request);
+    return plane.status();
+  });
 
   /**
    * T7 - trace access control, plus T5 scoped queries.

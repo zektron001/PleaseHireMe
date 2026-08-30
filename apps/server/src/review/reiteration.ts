@@ -5,6 +5,7 @@ import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
 import { WarrantBindingError } from "../warrant/binding.js";
+import { activityBus } from "../live/activity.js";
 import type { ReviewService } from "./service.js";
 import type { ReiterationRun, ReiterationStatus, ReviewComment } from "./types.js";
 
@@ -156,8 +157,23 @@ export async function runReiteration(
   const workspacePath = bound.request.workspacePath;
   await deps.reconciler.materialize(workspacePath, agentId, [docId]);
 
+  const watch = activityBus.watch({
+    agentId,
+    subtaskId: subtask.id,
+    humanId,
+    purpose: "reiteration",
+    prompt:
+      comments.length +
+      " review comment" +
+      (comments.length === 1 ? "" : "s") +
+      " on " +
+      docId,
+    model: bound.model,
+  });
+
   try {
-    const result = await deps.runner.run(bound.request);
+    const result = await deps.runner.run({ ...bound.request, inspect: watch.inspect });
+    watch.finish(result.usage);
     const reconciled = await deps.reconciler.reconcile(workspacePath, agentId, [docId], {
       message: "address review comments on " + docId,
       runId: run.id,
@@ -177,6 +193,7 @@ export async function runReiteration(
     );
   } catch (error) {
     deps.plane.orchestrator.setState(subtask.id, "assigned");
+    watch.fail(error instanceof Error ? error.message : String(error));
     // A turn that threw may still have left edits on disk; reconciling is the
     // safe direction, and whatever CONCORD says about them is the real outcome.
     const reconciled = await deps.reconciler

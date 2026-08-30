@@ -66,6 +66,7 @@ beforeEach(async () => {
   } as NodeJS.ProcessEnv);
   plane = await WarrantPlane.bootstrap(config);
   turn = async () => {};
+  tokens.clear();
   app = await createApp(config, service, undefined, plane, runner);
 });
 
@@ -79,6 +80,30 @@ const login = async (handle: string): Promise<string> =>
       await app.inject({ method: "POST", url: "/api/warrant/session", payload: { handle } })
     ).json().token as string;
 
+/**
+ * Every CONCORD route now requires the session of the human who delegated to
+ * the Agent being named: an Agent id is a SELECTOR, not a credential. These
+ * tests are about the PDP behind that gate, not the gate itself, so they sign
+ * in as whoever owns the Agent - and as the orchestrator for the deliberately
+ * unwarranted `agent_nobody`, who may name any Agent and still be refused by
+ * the PDP, which is the thing under test. The gate itself is tested in
+ * access.test.ts.
+ */
+const tokens = new Map<string, string>();
+const sessionFor = async (agentId: string): Promise<string> => {
+  const humanId =
+    plane.orchestrator.subtaskByAgent(agentId)?.ownerId ?? "human:orchestrator";
+  const cached = tokens.get(humanId);
+  if (cached) return cached;
+  const token = await login(humanId.replace(/^human:/, ""));
+  tokens.set(humanId, token);
+  return token;
+};
+
+const asAgent = async (agentId: string): Promise<Record<string, string>> => ({
+  authorization: "Bearer " + (await sessionFor(agentId)),
+});
+
 /** Plans a task whose subtasks all share one document. */
 async function planShared(): Promise<Planned[]> {
   const result = await plane.orchestrator.plan({
@@ -91,17 +116,24 @@ async function planShared(): Promise<Planned[]> {
   return result.subtasks as unknown as Planned[];
 }
 
-const read = (agentId: string, docId = SHARED) =>
+const read = async (agentId: string, docId = SHARED) =>
   app.inject({
     method: "GET",
     url: "/api/concord/docs/" + encodeURIComponent(docId) + "?agentId=" + agentId,
+    headers: await asAgent(agentId),
   });
 
-const write = (agentId: string, expectedVersion: number, content: string, docId = SHARED) =>
+const write = async (
+  agentId: string,
+  expectedVersion: number,
+  content: string,
+  docId = SHARED,
+) =>
   app.inject({
     method: "POST",
     url: "/api/concord/docs/" + encodeURIComponent(docId),
     payload: { agentId, expectedVersion, content },
+    headers: await asAgent(agentId),
   });
 
 describe("a shared document both Agents may write", () => {
@@ -185,6 +217,7 @@ describe("a shared document both Agents may write", () => {
           encodeURIComponent(SHARED) +
           "/history?agentId=" +
           alice.agentId,
+        headers: await asAgent(alice.agentId),
       })
     ).json().history;
 
@@ -220,6 +253,7 @@ describe("WARRANT still governs CONCORD", () => {
       method: "GET",
       url:
         "/api/concord/docs/" + encodeURIComponent(SHARED) + "/history?agentId=agent_nobody",
+      headers: await asAgent("agent_nobody"),
     });
     expect(res.statusCode).toBe(403);
   });
@@ -233,12 +267,14 @@ describe("WARRANT still governs CONCORD", () => {
     const mine = await app.inject({
       method: "GET",
       url: "/api/concord/docs?agentId=" + alice.agentId,
+      headers: await asAgent(alice.agentId),
     });
     expect(mine.json().docs.map((d: { id: string }) => d.id)).toContain(SHARED);
 
     const theirs = await app.inject({
       method: "GET",
       url: "/api/concord/docs?agentId=agent_nobody",
+      headers: await asAgent("agent_nobody"),
     });
     expect(theirs.json().docs).toEqual([]);
   });
@@ -273,6 +309,7 @@ describe("leases over HTTP", () => {
       method: "POST",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease",
       payload: { agentId: alice.agentId, ttlMs: 60_000 },
+      headers: await asAgent(alice.agentId),
     });
     expect(lease.statusCode).toBe(200);
 
@@ -284,6 +321,7 @@ describe("leases over HTTP", () => {
       method: "DELETE",
       url:
         "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease?agentId=" + alice.agentId,
+      headers: await asAgent(alice.agentId),
     });
     expect(released.json().released).toBe(true);
     expect((await write(bob.agentId, 0, "bob now")).statusCode).toBe(200);
@@ -298,6 +336,7 @@ describe("leases over HTTP", () => {
       method: "POST",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease",
       payload: { agentId: alice.agentId, ttlMs: 60_000 },
+      headers: await asAgent(alice.agentId),
     });
 
     // A holder id is not a secret. Without authority on the release path,
@@ -305,6 +344,7 @@ describe("leases over HTTP", () => {
     const stripped = await app.inject({
       method: "DELETE",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease?agentId=agent_nobody",
+      headers: await asAgent("agent_nobody"),
     });
     expect(stripped.statusCode).toBe(403);
 
@@ -405,6 +445,7 @@ describe("presence over HTTP", () => {
           encodeURIComponent(SHARED) +
           "/presence?agentId=" +
           alice.agentId,
+        headers: await asAgent(alice.agentId),
       })
     ).json().present as { agentId: string; activity: string }[];
 
@@ -418,6 +459,7 @@ describe("presence over HTTP", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/presence?agentId=agent_nobody",
+      headers: await asAgent("agent_nobody"),
     });
     expect(res.statusCode).toBe(403);
   });

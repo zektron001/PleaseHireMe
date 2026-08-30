@@ -1,9 +1,11 @@
 /**
  * Review route surface.
  *
- * Identity follows the CONCORD rule exactly: a human never names itself. The
- * reviewer is read from the session token, so a comment cannot be attributed to
- * someone else by editing a request body.
+ * Identity follows the CONCORD rule exactly, in both halves. A human never
+ * names itself: the reviewer is read from the session token, so a comment
+ * cannot be attributed to someone else by editing a request body. And an
+ * `agentId` selects one of the caller's own delegations rather than proving
+ * anything - `requireAgentOf` checks the caller holds it before the route runs.
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -12,6 +14,7 @@ import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
 import type { HumanPrincipal } from "../warrant/types.js";
+import { bearerToken, requireAgentOf } from "../warrant/access.js";
 import { ConsultationService } from "./consultation.js";
 import { runReiteration } from "./reiteration.js";
 import { ReviewService } from "./service.js";
@@ -44,11 +47,6 @@ const consultBody = z.object({
 });
 const consultParams = z.object({ id: z.string().uuid() });
 
-function bearerToken(request: FastifyRequest): string | undefined {
-  const header = request.headers.authorization;
-  return header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-}
-
 export async function registerReviewRoutes(
   app: FastifyInstance,
   plane: WarrantPlane,
@@ -61,6 +59,17 @@ export async function registerReviewRoutes(
   const requireHuman = (request: FastifyRequest) => {
     const human = plane.whoami(bearerToken(request));
     if (!human) throw new HttpError(401, "Sign in to continue");
+    return human;
+  };
+
+  /**
+   * The reading Agent is a selector, not a credential - same rule as CONCORD.
+   * Without this a signed-in reviewer could pass a colleague's Agent id and
+   * read review state for documents their own warrant does not cover.
+   */
+  const actingAs = (request: FastifyRequest, agentId: string) => {
+    const human = requireHuman(request);
+    requireAgentOf(plane, human, agentId);
     return human;
   };
 
@@ -96,17 +105,17 @@ export async function registerReviewRoutes(
 
   /** Who should receive a comment on this range, from CONCORD provenance. */
   app.get("/api/review/docs/:docId/route", async (request) => {
-    requireHuman(request);
     const { docId } = docParams.parse(request.params);
     const { agentId, startLine, endLine } = rangeQuery.parse(request.query);
+    actingAs(request, agentId);
     if (endLine < startLine) throw new HttpError(400, "endLine precedes startLine");
     return review.routeFor(docId, agentId, startLine, endLine);
   });
 
   app.get("/api/review/docs/:docId/comments", async (request) => {
-    requireHuman(request);
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     // Gate on the same authorization that guards document history.
     const gate = plane.docs.readHistory(docId, agentId);
     if (gate.status === "denied") throw new HttpError(403, gate.reason);
@@ -188,6 +197,9 @@ export async function registerReviewRoutes(
     if (body.endLine < body.startLine) {
       throw new HttpError(400, "endLine precedes startLine");
     }
+    // The Agent whose warrant is used to READ the lines, before we work out
+    // which Agent should be ASKED about them.
+    requireAgentOf(plane, human, body.agentId);
 
     const routing = review.routeFor(
       body.docId,

@@ -271,6 +271,15 @@ export class ReviewService {
     );
   }
 
+  /**
+   * Every comment, across documents. Used by the live board, which is scoped by
+   * its caller to the Agents the viewer holds - so this stays unscoped on
+   * purpose rather than growing a second, weaker notion of visibility.
+   */
+  listAllComments(): ReviewComment[] {
+    return structuredClone([...this.comments.values()]);
+  }
+
   listRuns(docId: string): ReiterationRun[] {
     return structuredClone(
       [...this.runs.values()].filter((run) => run.docId === docId),

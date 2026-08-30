@@ -56,6 +56,7 @@ beforeEach(async () => {
   } as NodeJS.ProcessEnv);
   plane = await WarrantPlane.bootstrap(config);
   turn = async () => {};
+  tokens.clear();
   app = await createApp(config, service, undefined, plane, runner);
 });
 
@@ -68,6 +69,23 @@ const login = async (handle: string): Promise<string> =>
   (await app.inject({ method: "POST", url: "/api/warrant/session", payload: { handle } }))
     .json().token as string;
 
+/**
+ * CONCORD and the review reads now need the session of the human who delegated
+ * to the Agent being named - an Agent id selects a delegation, it does not
+ * prove one. See warrant/access.ts; the gate itself is tested in access.test.ts.
+ */
+const tokens = new Map<string, string>();
+const asAgent = async (agentId: string): Promise<Record<string, string>> => {
+  const humanId =
+    plane.orchestrator.subtaskByAgent(agentId)?.ownerId ?? "human:orchestrator";
+  let token = tokens.get(humanId);
+  if (!token) {
+    token = await login(humanId.replace(/^human:/, ""));
+    tokens.set(humanId, token);
+  }
+  return { authorization: "Bearer " + token };
+};
+
 async function planShared(): Promise<Planned[]> {
   const result = await plane.orchestrator.plan({
     title: "Add rate limiting to the API",
@@ -79,11 +97,12 @@ async function planShared(): Promise<Planned[]> {
   return result.subtasks as unknown as Planned[];
 }
 
-const write = (agentId: string, expectedVersion: number, content: string) =>
+const write = async (agentId: string, expectedVersion: number, content: string) =>
   app.inject({
     method: "POST",
     url: "/api/concord/docs/" + encodeURIComponent(SHARED),
     payload: { agentId, expectedVersion, content },
+    headers: await asAgent(agentId),
   });
 
 const comment = (token: string, payload: Record<string, unknown>) =>
@@ -191,16 +210,19 @@ describe("review routes over HTTP", () => {
       method: "GET",
       url:
         "/api/concord/docs/" + encodeURIComponent(SHARED) + "/blame?agentId=" + alice.agentId,
+      headers: await asAgent(alice.agentId),
     });
     expect(blame.statusCode).toBe(200);
     const lines = blame.json().lines as { lastModifiedByAgentId: string | null }[];
     expect(lines).toHaveLength(3);
     expect(lines.every((line) => line.lastModifiedByAgentId === alice.agentId)).toBe(true);
 
-    // An Agent with no warrant for this document learns nothing about it.
+    // An Agent nobody delegated to learns nothing about it - and a signed-in
+    // caller naming it learns nothing either, because the id is a selector.
     const denied = await app.inject({
       method: "GET",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/blame?agentId=agent:stranger",
+      headers: await asAgent(alice.agentId),
     });
     expect(denied.statusCode).toBe(403);
   });
@@ -217,6 +239,7 @@ describe("review routes over HTTP", () => {
         encodeURIComponent(SHARED) +
         "/contributions?agentId=" +
         alice.agentId,
+      headers: await asAgent(alice.agentId),
     });
     expect(log.statusCode).toBe(200);
     const contributions = log.json().contributions as { agentId: string }[];
@@ -340,6 +363,7 @@ describe("review routes over HTTP", () => {
     const doc = await app.inject({
       method: "GET",
       url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "?agentId=" + alice.agentId,
+      headers: await asAgent(alice.agentId),
     });
     expect(doc.json().content).toContain("rate limited");
 
@@ -365,6 +389,7 @@ describe("review routes over HTTP", () => {
       await app.inject({
         method: "GET",
         url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "?agentId=" + alice.agentId,
+        headers: await asAgent(alice.agentId),
       })
     ).json();
 
@@ -395,6 +420,7 @@ describe("review routes over HTTP", () => {
       await app.inject({
         method: "GET",
         url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "?agentId=" + alice.agentId,
+        headers: await asAgent(alice.agentId),
       })
     ).json();
     expect(after.version).toBe(before.version);

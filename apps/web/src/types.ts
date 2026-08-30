@@ -237,6 +237,22 @@ export interface ReviewState {
   events: ReviewEvent[];
 }
 
+export interface Consultation {
+  id: string;
+  docId: string;
+  agentId: string;
+  humanId: string;
+  baseVersion: number;
+  startLine: number;
+  endLine: number;
+  question: string;
+  answer: string | null;
+  status: "queued" | "running" | "completed" | "failed";
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export interface AgentRouting {
   recommendedAgentId: string | null;
   candidateAgentIds: string[];
@@ -258,4 +274,128 @@ export interface BlameView {
   id: string;
   version: number;
   lines: BlameLine[];
+}
+
+/* --------------------------------------------------- live collaboration --- */
+// What /api/live/* returns. Everything here is composed by the server from
+// state that already existed - warrants, subtask states, CONCORD presence and
+// conflicts, and the Codex event stream. Nothing on this board is simulated.
+
+export type ActivityKind =
+  | "prompt"
+  | "turn-started"
+  | "thinking"
+  | "message"
+  | "command"
+  | "file-change"
+  | "turn-completed"
+  | "blocked";
+
+export type ActivityPurpose = "turn" | "consultation" | "reiteration";
+
+export interface ActivityEvent {
+  id: string;
+  at: string;
+  agentId: string;
+  subtaskId: string | null;
+  humanId: string | null;
+  purpose: ActivityPurpose;
+  kind: ActivityKind;
+  detail: string;
+  usage?: { inputTokens?: number; outputTokens?: number; model?: string };
+}
+
+export interface AgentUsage {
+  agentId: string;
+  humanId: string | null;
+  model: string | null;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  lastAt: string | null;
+}
+
+export interface SessionAgent {
+  agentId: string;
+  subtaskId: string;
+  title: string;
+  ownerId: string;
+  model: string;
+  state: string;
+  /** True only for Agents this human delegated to; the rest are read-only. */
+  mine: boolean;
+}
+
+export interface BoardSession {
+  id: string;
+  title: string;
+  createdBy: string;
+  createdAt: string;
+  state: string;
+  sharedPaths: string[];
+  running: number;
+  docs: { id: string; version: number; conflicts: number }[];
+  participants: string[];
+  agents: SessionAgent[];
+}
+
+export interface PersonAgent {
+  agentId: string;
+  subtaskId: string;
+  title: string;
+  state: string;
+  model: string;
+  warrantId: string | null;
+  scopes: string[];
+  /** Derived from the scopes above. Not a second permission model. */
+  role: string;
+  live: boolean;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  resources: string[];
+  revocableByViewer: boolean;
+}
+
+export interface BoardPerson {
+  id: string;
+  handle: string;
+  displayName: string;
+  isOrchestrator: boolean;
+  agents: PersonAgent[];
+}
+
+export interface QueueRow {
+  kind: "turn" | "reiteration" | "conflict" | "comment";
+  id: string;
+  agentId: string | null;
+  humanId: string | null;
+  docId: string | null;
+  label: string;
+  state: string;
+}
+
+export interface LiveBoard {
+  viewer: string;
+  scope: "all" | "own";
+  sessions: BoardSession[];
+  people: BoardPerson[];
+  queue: QueueRow[];
+  usage: AgentUsage[];
+  activity: ActivityEvent[];
+}
+
+export interface AccessWarrant {
+  id: string;
+  humanId: string;
+  agentId: string;
+  subtaskId: string;
+  role: string;
+  scopes: string[];
+  resources: string[];
+  issuedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  live: boolean;
+  revocableByViewer: boolean;
 }

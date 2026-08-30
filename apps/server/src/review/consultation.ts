@@ -5,6 +5,7 @@ import type { SharedDocStore } from "../concord/store.js";
 import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import { WarrantBindingError } from "../warrant/binding.js";
+import { activityBus } from "../live/activity.js";
 import type { WarrantPlane } from "../warrant/index.js";
 import { sliceLines } from "./service.js";
 
@@ -144,7 +145,19 @@ export class ConsultationService {
       // the Agent permanently "in_progress" and the consultation stuck at
       // "running" with no completedAt.
       await this.reconciler.materialize(workspacePath, input.agentId, [input.docId]);
-      const result = await this.runner.run(bound.request);
+      // The board should show a consultation happening, and show that it was a
+      // consultation - it occupies the Agent and spends the budget exactly like
+      // a turn, so hiding it would make the queue read as idle while it is not.
+      const watch = activityBus.watch({
+        agentId: input.agentId,
+        subtaskId: subtask.id,
+        humanId: input.humanId,
+        purpose: "consultation",
+        prompt: question,
+        model: bound.model,
+      });
+      const result = await this.runner.run({ ...bound.request, inspect: watch.inspect });
+      watch.finish(result.usage);
       this.plane.orchestrator.setState(subtask.id, "assigned");
 
       // Discard anything the Agent wrote: re-materializing overwrites the

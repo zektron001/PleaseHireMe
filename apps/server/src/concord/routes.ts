@@ -1,22 +1,28 @@
 /**
  * CONCORD route surface.
  *
- * Two identity rules, and they differ on purpose.
+ * ONE identity rule, in two halves.
  *
- *   Agents  name themselves with `agentId`, and authority is resolved through
- *           the same WARRANT PDP that guards workspaces - inside the store's
+ *   Humans  never name themselves. Identity comes ONLY from the session token,
+ *           exactly like the Track B routes. There is nothing in a body to
+ *           forge, because nothing in a body is read.
+ *   Agents  are SELECTED with `agentId`, not authenticated by it. The caller
+ *           must hold the delegation behind that Agent (`requireAgentOf`), and
+ *           the authority to touch the resource is then resolved through the
+ *           same WARRANT PDP that guards workspaces - inside the store's
  *           critical section, so a revocation between read and write is
- *           honoured rather than raced. An Agent id is not a secret; the
- *           warrant behind it is what grants anything.
- *   Humans  never name themselves. Resolving a conflict is a human decision,
- *           so it reads identity ONLY from the session token, exactly like the
- *           Track B routes. There is nothing in the body to forge.
+ *           honoured rather than raced.
+ *
+ * The second half used to be missing, and that was a real hole: Agent ids are
+ * not secrets, `/api/warrant/tasks/:id` published them, and every route here
+ * would act on any id it was handed.
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "../warrant/index.js";
+import { bearerToken, requireAgentOf } from "../warrant/access.js";
 import { docResource, keepBoth, type AuthzCheck } from "./store.js";
 
 const docParams = z.object({ docId: z.string().trim().min(1).max(200) });
@@ -57,11 +63,6 @@ export function warrantAuthzCheck(plane: WarrantPlane): AuthzCheck {
   };
 }
 
-function bearerToken(request: FastifyRequest): string | undefined {
-  const header = request.headers.authorization ?? "";
-  return header.startsWith("Bearer ") ? header.slice(7) : undefined;
-}
-
 export async function registerConcordRoutes(
   app: FastifyInstance,
   plane: WarrantPlane,
@@ -74,16 +75,28 @@ export async function registerConcordRoutes(
     return human;
   };
 
+  /**
+   * Every route below that takes an `agentId` goes through here first. Signing
+   * in is not enough: the Agent named has to be one this human delegated to.
+   */
+  const actingAs = (request: FastifyRequest, agentId: string) => {
+    const human = requireHuman(request);
+    requireAgentOf(plane, human, agentId);
+    return human;
+  };
+
   // Scoped to the caller: an unscoped listing is a directory of every other
   // human's documents, and it hands out the lease holder ids to release.
   app.get("/api/concord/docs", async (request) => {
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     return { docs: store.list(agentId) };
   });
 
   app.get("/api/concord/docs/:docId", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const result = await store.read(docId, agentId);
     if (result.status === "denied") {
       throw new HttpError(403, result.reason ?? "Denied");
@@ -100,6 +113,7 @@ export async function registerConcordRoutes(
   app.post("/api/concord/docs/:docId", async (request, reply) => {
     const { docId } = docParams.parse(request.params);
     const body = writeBody.parse(request.body);
+    actingAs(request, body.agentId);
     const outcome = await store.write(
       docId,
       body.agentId,
@@ -175,6 +189,7 @@ export async function registerConcordRoutes(
   app.get("/api/concord/docs/:docId/presence", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const result = store.presenceOf(docId, agentId);
     if (result.status === "denied") throw new HttpError(403, result.reason);
     return result;
@@ -183,6 +198,7 @@ export async function registerConcordRoutes(
   app.post("/api/concord/docs/:docId/lease", async (request, reply) => {
     const { docId } = docParams.parse(request.params);
     const body = leaseBody.parse(request.body);
+    actingAs(request, body.agentId);
     const result = await store.acquireLease(
       docId,
       body.agentId,
@@ -194,6 +210,7 @@ export async function registerConcordRoutes(
   app.delete("/api/concord/docs/:docId/lease", async (request, reply) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const outcome = await store.releaseLease(docId, agentId);
     if (outcome.status === "denied") {
       throw new HttpError(403, outcome.reason);
@@ -214,6 +231,7 @@ export async function registerConcordRoutes(
   app.get("/api/concord/docs/:docId/blame", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const gate = store.readHistory(docId, agentId);
     if (gate.status === "denied") throw new HttpError(403, gate.reason);
     if (gate.status === "missing") throw new HttpError(404, "Document not found");
@@ -255,6 +273,7 @@ export async function registerConcordRoutes(
   app.get("/api/concord/docs/:docId/contributions", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const result = store.readHistory(docId, agentId);
     if (result.status === "denied") throw new HttpError(403, result.reason);
     if (result.status === "missing") throw new HttpError(404, "Document not found");
@@ -268,6 +287,7 @@ export async function registerConcordRoutes(
   app.get("/api/concord/docs/:docId/history", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
     const result = store.readHistory(docId, agentId);
     if (result.status === "denied") throw new HttpError(403, result.reason);
     if (result.status === "missing") throw new HttpError(404, "Document not found");

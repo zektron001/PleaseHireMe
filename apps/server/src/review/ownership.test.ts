@@ -53,6 +53,18 @@ const login = async (handle: string): Promise<string> =>
   (await app.inject({ method: "POST", url: "/api/warrant/session", payload: { handle } }))
     .json().token as string;
 
+/** Seeds content through CONCORD as the Agent's own owner. */
+const seed = async (agentId: string, content: string) => {
+  const ownerId = plane.orchestrator.subtaskByAgent(agentId)?.ownerId ?? "human:alice";
+  const token = await login(ownerId.replace(/^human:/, ""));
+  return app.inject({
+    method: "POST",
+    url: "/api/concord/docs/" + encodeURIComponent(SHARED),
+    payload: { agentId, expectedVersion: 0, content },
+    headers: { authorization: "Bearer " + token },
+  });
+};
+
 interface Planned { id: string; ownerId: string; agentId: string }
 
 async function plan(): Promise<Planned[]> {
@@ -71,11 +83,7 @@ describe("review paths enforce Agent ownership", () => {
     const subtasks = await plan();
     const alice = subtasks.find((s) => s.ownerId === "human:alice")!;
     const bobToken = await login("bob");
-    await app.inject({
-      method: "POST",
-      url: "/api/concord/docs/" + encodeURIComponent(SHARED),
-      payload: { agentId: alice.agentId, expectedVersion: 0, content: "# Changelog\n\n- one" },
-    });
+    await seed(alice.agentId, "# Changelog\n\n- one");
 
     const denied = await app.inject({
       method: "POST",
@@ -91,7 +99,11 @@ describe("review paths enforce Agent ownership", () => {
     });
 
     expect(denied.statusCode).toBe(403);
-    // The refusal is evidence, not just an HTTP code.
+    // The refusal is evidence, not just an HTTP code. It is now WB-11 rather
+    // than WB-6, because the delegation gate refuses Bob for naming an Agent he
+    // does not hold BEFORE the document is read at all - a strictly earlier and
+    // cheaper refusal than the cross-owner rule it used to reach. WB-6 still
+    // guards the target Agent; the next test drives it.
     const chain = await app.inject({
       method: "GET",
       url: "/api/warrant/events",
@@ -100,7 +112,9 @@ describe("review paths enforce Agent ownership", () => {
     const events = chain.json().events as { verdict: { ruleId: string }; agentId: string }[];
     expect(
       events.some(
-        (e) => e.verdict.ruleId === "WB-6.cross-owner" && e.agentId === alice.agentId,
+        (e) =>
+          e.verdict.ruleId === "WB-11.agent-not-delegated" &&
+          e.agentId === alice.agentId,
       ),
     ).toBe(true);
 
@@ -112,11 +126,7 @@ describe("review paths enforce Agent ownership", () => {
     const subtasks = await plan();
     const alice = subtasks.find((s) => s.ownerId === "human:alice")!;
     const aliceToken = await login("alice");
-    await app.inject({
-      method: "POST",
-      url: "/api/concord/docs/" + encodeURIComponent(SHARED),
-      payload: { agentId: alice.agentId, expectedVersion: 0, content: "# Changelog\n\n- one" },
-    });
+    await seed(alice.agentId, "# Changelog\n\n- one");
 
     const allowed = await app.inject({
       method: "POST",
@@ -132,6 +142,44 @@ describe("review paths enforce Agent ownership", () => {
     });
     expect(allowed.statusCode).toBe(200);
     expect(allowed.json().consultation.status).toBe("completed");
+  });
+
+  it("still refuses when the reading Agent is yours but the target Agent is not", async () => {
+    const subtasks = await plan();
+    const alice = subtasks.find((s) => s.ownerId === "human:alice")!;
+    const bob = subtasks.find((s) => s.ownerId === "human:bob")!;
+    const bobToken = await login("bob");
+    await seed(alice.agentId, "# Changelog\n\n- one");
+
+    // Bob reads through his OWN Agent - the delegation gate is satisfied - and
+    // then asks for Alice's Agent to be run. That is exactly what WB-6 refuses.
+    const denied = await app.inject({
+      method: "POST",
+      url: "/api/review/consultations",
+      headers: { authorization: "Bearer " + bobToken },
+      payload: {
+        docId: SHARED,
+        agentId: bob.agentId,
+        targetAgentId: alice.agentId,
+        startLine: 3,
+        endLine: 3,
+        question: "why?",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const chain = await app.inject({
+      method: "GET",
+      url: "/api/warrant/events",
+      headers: { authorization: "Bearer " + bobToken },
+    });
+    const events = chain.json().events as { verdict: { ruleId: string }; agentId: string }[];
+    expect(
+      events.some(
+        (e) => e.verdict.ruleId === "WB-6.cross-owner" && e.agentId === alice.agentId,
+      ),
+    ).toBe(true);
+    expect(plane.orchestrator.subtaskByAgent(alice.agentId)?.state).not.toBe("in_progress");
   });
 });
 

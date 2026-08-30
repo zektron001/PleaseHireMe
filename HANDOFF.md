@@ -1,6 +1,7 @@
 # HANDOFF
 
-Written 2026-08-31 so a fresh session can pick this up without re-deriving it.
+Written 2026-08-31, updated the same day, so a fresh session can pick this up
+without re-deriving it.
 Read this first, then `docs/MASTER.md`.
 
 ## 1. Where the code is — read this before anything else
@@ -21,9 +22,9 @@ anything about what is or is not implemented.**
 | | |
 | --- | --- |
 | Branch | `main`, pushed |
-| Tests | **328**, `npm run check` green (typecheck + tests + build) |
+| Tests | **358**, `npm run check` green (typecheck + tests + build) |
 | Declared track | **B — The Bouncer**. Do not change it without the team. |
-| Ark | configured and **live-verified** — a real turn returned a real answer |
+| Ark | configured and **live-verified** — real turns, and the live activity feed carries their real event stream |
 
 Branches `feat/line-provenance` and `feat/blame-consult` are merged into `main`.
 
@@ -38,7 +39,7 @@ That is the everyday setup. Codex runs in-process (`RUNTIME_PROVIDER=local-proce
 **no Docker needed**, and the chat works.
 
 ```bash
-npm run check              # typecheck + 328 tests + build
+npm run check              # typecheck + 358 tests + build
 npm run demo:warrant       # 10-beat Track B story, ~2s, no key or Docker
 npm run poc                # full container POC — only for the AEGIS sandbox demo
 ```
@@ -70,13 +71,31 @@ All in `main`. Full design write-up: `docs/CONCORD_REVIEW_LOOP.md`.
    *resolved* — only a human resolves.
 4. **Console UI** — night mode (light/dark/system), IDE chrome (activity bar,
    tabs, bottom panel, status bar), per-line blame gutter, review panel.
+5. **Live collaboration plane** (`live/`, `Collab.tsx`, `Sessions.tsx`,
+   `Code.tsx`) — the multiplayer-IDE features from the reel, backed by real
+   state. **Agent Live** streams the runtime's own Codex event feed over SSE,
+   tapped where AEGIS already inspects it. Plus sessions dashboard, people,
+   queue, usage, an access sheet rendering warrant scopes as roles, participant
+   colours, and syntax colouring. Design write-up and the honest scorecard:
+   `docs/AMOEBA_INSPIRATION_SCOPE.md`.
+6. **The `agentId` authorization hole is closed** (`warrant/access.ts`). See §5a.
 
 ## 5. Outstanding — read before demoing
 
 ### 5a. Code-review findings NOT yet fixed
 
-A review of `main...HEAD` raised 15. Four were fixed (commit `5978fd0`). These
-remain. **Most are in AEGIS and belong to its owner — do not rewrite AEGIS
+A review of `main...HEAD` raised 15. Four were fixed in `5978fd0`, and the
+**most serious one — the `app.ts:72` / `agentId` hole — is now fixed too**, with
+12 regression tests at the HTTP boundary (`warrant/access.test.ts`).
+
+What that was: `/api/warrant/tasks` was anonymous and returns every subtask's
+`agentId`, and CONCORD and review took a bare `agentId` as their only identity.
+Two GETs and a POST let a stranger write another human's shared documents, with
+`APP_AUTH_TOKEN` set or not. An Agent id is now a **selector** for one of your
+own delegations, checked against the session token. `/api/warrant/status` and
+the task routes need a session; task views are participant-scoped.
+
+These remain. **Most are in AEGIS and belong to its owner — do not rewrite AEGIS
 without talking to them.**
 
 | Where | Problem |
@@ -86,35 +105,49 @@ without talking to them.**
 | `aegis/egress/broker.ts:73` | `server.requestTimeout = 0` disables the timeout, the opposite of what the comment above it says. |
 | `aegis/index.ts:270` | Broker binds `0.0.0.0`, exposing an Ark-shaped endpoint on every interface. MASTER R11 shows binding the network's bridge gateway gives the same reachability without the exposure. |
 | `aegis/sandbox/network.ts:124` | `probeBroker` treats *any* HTTP response as healthy, so an unrelated process on :8788 makes the hardened profile report complete. |
-| `app.ts:72` | `/api/concord/` and `/api/review/` are exempt from the shared token and authenticate on a caller-supplied `agentId`. `/api/warrant/tasks/:id` hands those ids out **unauthenticated**, so with `APP_AUTH_TOKEN` set a stranger can still write shared documents. **The most serious one.** |
 | `concord/store.ts:300` | `conflictSeq` restores from the count of *open* conflicts, not the highest ever issued, so ids can collide after a restart and a human settles the wrong Agent's edit. |
 | `concord/reconcile.ts:178` | `forget()` is never called; the checkouts map grows for the process lifetime. |
 | `concord/routes.ts:144` | `{choice:"content", content:""}` is rejected by a falsy check — emptying a contested file is legitimate and should use `=== undefined`. |
-| docs | Test counts disagree: `MASTER.md` says 324/255 in different places, README and THREAT_MODEL say 255. Actual is **328**. |
+
 
 ### 5b. Not verified
 
-- **Nobody has looked at the UI in a browser.** It compiles, builds, and the
-  API paths are exercised, but no human eye has seen night mode or the console.
-  **Do this before demoing.**
-- **No live Ark run of the review loop.** The chat path is live-verified; an
-  Agent actually revising code through re-iteration, or answering a
-  consultation, is still only tested against a stubbed runner. (`R12`)
+- **Nobody has looked at the UI in a browser.** Still true, and now it matters
+  more: there is a great deal more of it. Every module compiles, builds and is
+  served by Vite, and every route behind it is live-verified over real HTTP —
+  but no human eye has seen the layout. **Do this first.** (`R14`)
+- **No live Ark run of the review loop.** Narrowed: the *turn* path is now
+  verified end to end against a live model, including the activity feed. What
+  is still stubbed is a real model answering a consultation or revising code
+  through re-iteration. (`R12` / `R15`)
+- **The hardened AEGIS profile has not been run with the live feed attached.**
+  The tap sits behind the guarded runner's own `inspect` and its return value
+  is ignored, so it should be unaffected — but "should" is not "was". (`R16`)
 - Consultations are in memory; comments, runs and events persist. (`R13`)
 
-## 6. Work in progress, uncommitted
+### 5c. Two bugs the tests could not have caught
 
-`apps/server/src/live/activity.ts` — a live Agent activity feed. Codex emits
-JSONL and both runners already hand every line to `inspect` for AEGIS G3; this
-taps the same stream, so what it shows genuinely happened. The AEGIS runner now
-chains the caller's hook (after its own verdict, return value ignored) so an
-observer cannot abort a run.
+Both were found by running the thing, and both now have regression tests over a
+**real socket** — `app.inject` resolves a handler, it does not hold a connection
+open while later events are published.
 
-**Still to do:** publish from the `/run` route, an SSE endpoint, and a UI panel.
+1. The SSE stream resolved the viewer's Agent scope **once, at connect time**. A
+   browser that connected before splitting a task held an empty scope for the
+   life of the connection: socket open, keep-alives arriving, not one row
+   delivered — while the board poll showed everything.
+2. Node holds SSE headers until the first body write, so a viewer with no
+   Agents yet saw no connection at all and `EventSource.onopen` never fired.
 
-Deliberately excluded: character-level cursors. Codex reports items, not
-keystrokes, so a cursor would be fabricated. Section-level presence is what the
-backend actually knows.
+## 6. Work in progress
+
+Nothing uncommitted. The activity feed described in the previous version of this
+file as "uncommitted WIP" was in fact committed in `5978fd0`, and is now
+finished: it publishes from all three runner call sites (`/run`, consultation,
+re-iteration), streams over SSE at `/api/live/stream`, and has a UI panel.
+
+Deliberately excluded, and it should stay excluded: character-level cursors and
+a typing animation. The runtime reports completed items, not keystrokes, so
+either would be fabricated. Document-level presence is what the backend knows.
 
 ## 7. The Instagram-reel scorecard, honestly
 
@@ -131,7 +164,22 @@ The build proves the hard half and not the theatrical half.
 | Live cursors | ❌ Not built. Would be fake. |
 | Teammates' prompts | ❌ Not built |
 
-## 8. House rules
+## 8. Where to look for the new UI
+
+`apps/web/src/Console.tsx` is the shell. The pieces it composes:
+
+| File | What |
+| --- | --- |
+| `Sessions.tsx` | session cards — the dashboard view |
+| `Collab.tsx` | People, Subagents, Queue, Usage, Access, and Agent Live |
+| `Code.tsx` | line numbers, syntax colour, blame gutter, selection |
+| `participants.ts` | the per-participant colour derived from an id |
+| `console.css` | one appended section, from `Collaboration surface` down |
+
+Server side: `apps/server/src/live/` (activity bus + routes) and
+`apps/server/src/warrant/access.ts` (the delegation gate).
+
+## 9. House rules
 
 - One track: **B**. Extra tracks score nothing if the selected one is incomplete.
 - `npm run check` must be green before pushing.
