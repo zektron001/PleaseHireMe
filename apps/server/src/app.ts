@@ -62,7 +62,12 @@ export async function createApp(
       // authenticate it themselves against the Registry. The shared demo token
       // is not identity (it never was), so gating these on it would only break
       // the stronger check without adding one.
-      request.url.startsWith("/api/warrant/")
+      request.url.startsWith("/api/warrant/") ||
+      // CONCORD is the same argument. Every route here resolves either a
+      // warrant-bound agentId through the PDP or a per-human session token;
+      // one Authorization header cannot carry the shared token AND the
+      // identity that actually decides the request.
+      request.url.startsWith("/api/concord/")
     ) {
       return;
     }

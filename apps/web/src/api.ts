@@ -1,4 +1,13 @@
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type {
+  ChainView,
+  ConcordDoc,
+  DocView,
+  Human,
+  PendingConflict,
+  PlannedTask,
+  RunReport,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -14,6 +23,35 @@ let authToken = "";
 export function setAuthToken(token: string): void {
   authToken = token.trim();
 }
+
+/**
+ * The per-human session token from POST /api/warrant/session.
+ *
+ * Deliberately separate from `authToken`: the shared demo token says the
+ * browser may talk to this server at all, while this one says WHICH human is
+ * asking. They travel in the same header, so a request can carry one or the
+ * other - never both - and the middleware routes want this one.
+ */
+let sessionToken = "";
+
+export function setSessionToken(token: string): void {
+  sessionToken = token.trim();
+}
+
+async function asHuman<T>(url: string, options?: RequestInit): Promise<T> {
+  return request<T>(url, {
+    ...options,
+    headers: {
+      ...options?.headers,
+      ...(sessionToken ? { Authorization: "Bearer " + sessionToken } : {}),
+    },
+  });
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+});
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers = {
@@ -78,4 +116,56 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+
+  // ------------------------------------------------------ WARRANT (Track B)
+  humans: () => request<{ humans: Human[] }>("/api/warrant/humans"),
+  signIn: (handle: string) =>
+    request<{ token: string; human: Human }>(
+      "/api/warrant/session",
+      json({ handle }),
+    ),
+  tasks: () => request<{ tasks: PlannedTask["task"][] }>("/api/warrant/tasks"),
+  task: (id: string) => request<PlannedTask>("/api/warrant/tasks/" + id),
+  plan: (body: {
+    title: string;
+    owners: string[];
+    maxSubtasks?: number;
+    sharedPaths?: string[];
+  }) => asHuman<PlannedTask>("/api/warrant/tasks", json(body)),
+  runSubtask: (subtaskId: string, prompt: string) =>
+    asHuman<RunReport>(
+      "/api/warrant/subtasks/" + subtaskId + "/run",
+      json({ prompt }),
+    ),
+  revoke: (warrantId: string, reason: string) =>
+    asHuman<{ warrant: unknown }>("/api/warrant/revoke", json({ warrantId, reason })),
+  events: () => asHuman<ChainView>("/api/warrant/events"),
+
+  // ------------------------------------------------------------- CONCORD
+  docs: (agentId: string) =>
+    request<{ docs: ConcordDoc[] }>("/api/concord/docs?agentId=" + encodeURIComponent(agentId)),
+  doc: (docId: string, agentId: string) =>
+    request<DocView>(
+      "/api/concord/docs/" +
+        encodeURIComponent(docId) +
+        "?agentId=" +
+        encodeURIComponent(agentId),
+    ),
+  docHistory: (docId: string, agentId: string) =>
+    request<{ history: DocView["history"] }>(
+      "/api/concord/docs/" +
+        encodeURIComponent(docId) +
+        "/history?agentId=" +
+        encodeURIComponent(agentId),
+    ),
+  myConflicts: () =>
+    asHuman<{ viewer: string; conflicts: PendingConflict[] }>("/api/concord/conflicts"),
+  resolveConflict: (
+    docId: string,
+    body: { conflictId: string; choice: "ours" | "theirs" | "both" | "content"; content?: string },
+  ) =>
+    asHuman<{ outcome: { status: string } }>(
+      "/api/concord/docs/" + encodeURIComponent(docId) + "/resolve",
+      json(body),
+    ),
 };

@@ -25,6 +25,13 @@ export interface SubtaskProposal {
 
 export interface TaskSplitter {
   readonly name: string;
+  /**
+   * What produced the LAST split, which is not always `name`. The Ark splitter
+   * falls back silently by design, and reporting "ark" for a decomposition the
+   * rule splitter actually produced is a claim about a live model call that
+   * did not happen. Anyone reading a plan should be able to tell the two apart.
+   */
+  readonly lastSource?: string;
   split(title: string, max: number): Promise<SubtaskProposal[]>;
 }
 
@@ -82,6 +89,8 @@ interface ArkItem {
 /** Calls Ark's Responses API to propose a decomposition. */
 export class ArkSplitter implements TaskSplitter {
   readonly name = "ark";
+  /** "ark" only when the model actually answered. See TaskSplitter.lastSource. */
+  lastSource = "ark";
   private readonly fallback = new RuleSplitter();
 
   constructor(
@@ -89,8 +98,18 @@ export class ArkSplitter implements TaskSplitter {
     private readonly timeoutMs = 20_000,
   ) {}
 
+  private async fell(
+    reason: string,
+    title: string,
+    max: number,
+  ): Promise<SubtaskProposal[]> {
+    this.lastSource = "rule (ark " + reason + ")";
+    return this.fallback.split(title, max);
+  }
+
   async split(title: string, max: number): Promise<SubtaskProposal[]> {
-    if (!isArkConfigured(this.config)) return this.fallback.split(title, max);
+    this.lastSource = "ark";
+    if (!isArkConfigured(this.config)) return this.fell("not configured", title, max);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -119,13 +138,17 @@ export class ArkSplitter implements TaskSplitter {
           ],
         }),
       });
-      if (!response.ok) return this.fallback.split(title, max);
+      if (!response.ok) return this.fell("HTTP " + response.status, title, max);
 
       const parsed = parseArkProposals(await response.json(), max);
-      return parsed.length > 0 ? parsed : this.fallback.split(title, max);
-    } catch {
+      return parsed.length > 0 ? parsed : this.fell("unparseable reply", title, max);
+    } catch (error) {
       // Planner outage, bad key, malformed reply: never take the platform down.
-      return this.fallback.split(title, max);
+      const reason =
+        (error as Error).name === "AbortError"
+          ? "timed out after " + this.timeoutMs + "ms"
+          : ((error as Error).message ?? "unreachable");
+      return this.fell(reason, title, max);
     } finally {
       clearTimeout(timer);
     }

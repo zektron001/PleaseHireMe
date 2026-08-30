@@ -144,7 +144,12 @@ export class Orchestrator {
       state: "planned",
     };
     this.tasks.set(taskId, task);
-    return { task, subtasks: created, splitter: this.splitter.name };
+    // The source of THIS split, not the name of the splitter that was asked.
+    return {
+      task,
+      subtasks: created,
+      splitter: this.splitter.lastSource ?? this.splitter.name,
+    };
   }
 
   task(id: string): Task | null {

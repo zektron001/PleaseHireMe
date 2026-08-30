@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { SharedDocStore, PRESENCE_TTL_MS, type AuthzCheck } from "./store.js";
+import { keepBoth, SharedDocStore, PRESENCE_TTL_MS, type AuthzCheck } from "./store.js";
 import { WorkspaceReconciler } from "./reconcile.js";
 
 const allowAll: AuthzCheck = (agentId) => ({
@@ -195,6 +195,29 @@ describe("conflicts are kept until a human settles them", () => {
     const content = store.snapshot(DOC)?.content ?? "";
     expect(content).toContain("BOB");
     expect(content).toContain("CAROL");
+  });
+
+  it("keeps both sides in place rather than gluing two documents together", async () => {
+    const store = new SharedDocStore(allowAll);
+    store.seed(DOC, "# Changelog\n- TBD\n- unrelated\n");
+    await store.read(DOC, "alice_agent");
+    await store.read(DOC, "bob_agent");
+    await store.write(DOC, "alice_agent", 1, "# Changelog\n- rate limiter\n- unrelated\n");
+    const losing = await store.write(
+      DOC,
+      "bob_agent",
+      1,
+      "# Changelog\n- config validation\n- unrelated\n",
+    );
+    if (losing.status !== "conflict") throw new Error("expected a conflict");
+
+    const merged = keepBoth(store.snapshot(DOC)?.conflicts[0] ?? { theirs: "", conflicts: [] });
+    expect(merged).toBe(
+      "# Changelog\n- rate limiter\n- config validation\n- unrelated\n",
+    );
+    // The agreed lines appear once each; only the contested line is doubled.
+    expect(merged.split("\n").filter((l) => l === "# Changelog")).toHaveLength(1);
+    expect(merged.split("\n").filter((l) => l === "- unrelated")).toHaveLength(1);
   });
 
   it("does not resolve a conflict that no longer exists", async () => {

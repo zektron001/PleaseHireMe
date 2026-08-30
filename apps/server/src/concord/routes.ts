@@ -17,7 +17,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "../warrant/index.js";
-import { docResource, type AuthzCheck } from "./store.js";
+import { docResource, keepBoth, type AuthzCheck } from "./store.js";
 
 const docParams = z.object({ docId: z.string().trim().min(1).max(200) });
 const agentQuery = z.object({ agentId: z.string().trim().min(1) });
@@ -139,7 +139,7 @@ export async function registerConcordRoutes(
         : body.choice === "theirs"
           ? pending.theirs
           : body.choice === "both"
-            ? pending.theirs.replace(/\n*$/, "\n") + pending.ours
+            ? keepBoth(pending)
             : (body.content ?? "");
     if (body.choice === "content" && !body.content) {
       throw new HttpError(400, "choice 'content' requires the merged text");

@@ -140,6 +140,47 @@ export interface ReadOutcome {
   readonly reason?: string;
 }
 
+/**
+ * "Keep both", done in place: the committed text, with the losing Agent's
+ * version of each contested range inserted directly after the winning one.
+ *
+ * The naive reading of "both" - one document after the other - duplicates every
+ * line the two versions already agreed on, which is nearly all of them. Only the
+ * contested ranges are actually in dispute, so only those are doubled.
+ */
+export function keepBoth(conflict: {
+  theirs: string;
+  conflicts: readonly MergeConflict[];
+}): string {
+  const lines = conflict.theirs.length === 0 ? [] : conflict.theirs.split("\n");
+  const additions = new Map<number, string[]>();
+
+  for (const range of conflict.conflicts) {
+    // Locate the winning side's lines in the committed text and add ours after
+    // them. Falling back to the end keeps a conflict that has since moved from
+    // silently dropping the losing edit.
+    const at = findRun(lines, range.theirs);
+    const anchor = at === -1 ? lines.length : at + range.theirs.length;
+    additions.set(anchor, [...(additions.get(anchor) ?? []), ...range.ours]);
+  }
+
+  const out: string[] = [];
+  for (let index = 0; index <= lines.length; index += 1) {
+    for (const added of additions.get(index) ?? []) out.push(added);
+    if (index < lines.length) out.push(lines[index] as string);
+  }
+  return out.join("\n");
+}
+
+/** Index of the first occurrence of `needle` as consecutive lines, or -1. */
+function findRun(haystack: readonly string[], needle: readonly string[]): number {
+  if (needle.length === 0) return -1;
+  for (let index = 0; index + needle.length <= haystack.length; index += 1) {
+    if (needle.every((line, offset) => haystack[index + offset] === line)) return index;
+  }
+  return -1;
+}
+
 export const DEFAULT_LEASE_MS = 30_000;
 /** How long an Agent counts as present on a document after its last operation. */
 export const PRESENCE_TTL_MS = 15_000;

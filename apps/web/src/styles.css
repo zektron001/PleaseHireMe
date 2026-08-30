@@ -199,6 +199,22 @@ button {
   font-weight: 400;
 }
 
+.console-link {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  background: transparent;
+  border: 1px solid #3d3d38;
+  color: #d9d7cf;
+  font-size: 12px;
+}
+
+.console-link:hover {
+  border-color: #56564f;
+  color: #ffffff;
+}
+
 .sidebar-label {
   display: flex;
   justify-content: space-between;
