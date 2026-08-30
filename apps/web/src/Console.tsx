@@ -25,9 +25,11 @@ import type {
   DocView,
   Human,
   PlannedTask,
+  ReviewState,
   RunReport,
   Subtask,
 } from "./types";
+import { ReviewPanel } from "./Review";
 import "./console.css";
 
 const POLL_MS = 2000;
@@ -104,6 +106,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
     }
   }, []);
 
+  const [review, setReview] = useState<ReviewState | null>(null);
+  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const [anchorLine, setAnchorLine] = useState<number | null>(null);
+
   // Poll: documents, the chain, and the open document. Cheap, and it means two
   // browsers side by side show the same race the Agents are having.
   const refresh = useCallback(async () => {
@@ -117,7 +123,13 @@ export default function Console({ onExit }: { onExit: () => void }) {
       if (events) setChain(events);
       const target = selected ?? list.docs[0]?.id ?? null;
       if (target !== selected) setSelected(target);
-      if (target) setDoc(await api.doc(target, myAgent));
+      if (target) {
+        setDoc(await api.doc(target, myAgent));
+        if (me) {
+          // A 403 here just means this human cannot review that document.
+          setReview(await api.reviewState(target, myAgent).catch(() => null));
+        }
+      }
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 403) return;
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -355,17 +367,51 @@ export default function Console({ onExit }: { onExit: () => void }) {
               </div>
 
               {doc.content ? (
-                <div className="doc-lines">
-                  {doc.content.split("\n").map((line, index) => (
-                    <div key={index}>
-                      <span className="n">{index + 1}</span>
-                      <span>{line || " "}</span>
-                    </div>
-                  ))}
+                <div className="doc-lines selectable">
+                  {doc.content.split("\n").map((line, index) => {
+                    const number = index + 1;
+                    const inRange =
+                      selection !== null &&
+                      number >= selection.start &&
+                      number <= selection.end;
+                    return (
+                      <div
+                        key={index}
+                        className={inRange ? "line-selected" : undefined}
+                        onClick={(event) => {
+                          if (event.shiftKey && anchorLine !== null) {
+                            setSelection({
+                              start: Math.min(anchorLine, number),
+                              end: Math.max(anchorLine, number),
+                            });
+                          } else {
+                            setAnchorLine(number);
+                            setSelection({ start: number, end: number });
+                          }
+                        }}
+                      >
+                        <span className="n">{number}</span>
+                        <span>{line || " "}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="doc-empty">Empty. No Agent has committed to it yet.</p>
               )}
+
+              <ReviewPanel
+                docId={selected}
+                state={review}
+                selection={selection}
+                busy={busy !== null}
+                onRefresh={() => void refresh()}
+                onError={setError}
+                onClearSelection={() => {
+                  setSelection(null);
+                  setAnchorLine(null);
+                }}
+              />
 
               {openConflicts.map((conflict) => {
                 const contestedOurs = conflict.conflicts.flatMap((range) => range.ours);

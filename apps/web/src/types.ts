@@ -177,3 +177,68 @@ export interface RunReport {
   materialized: { docId: string; status: string; version?: number; reason?: string }[];
   reconciled: ReconcileRow[];
 }
+
+/* ------------------------------------------------------- review loop --- */
+
+export type CommentStatus =
+  | "open"
+  | "in_progress"
+  | "addressed"
+  | "resolved"
+  | "stale"
+  | "conflict"
+  | "failed";
+
+export interface ReviewComment {
+  id: string;
+  docId: string;
+  baseVersion: number;
+  startLine: number;
+  endLine: number;
+  selectedText: string;
+  selectedTextHash: string;
+  body: string;
+  responsibleAgentId: string;
+  createdByHumanId: string;
+  status: CommentStatus;
+  lastReiterationRunId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReiterationRun {
+  id: string;
+  docId: string;
+  agentId: string;
+  humanId: string;
+  commentIds: string[];
+  baseVersion: number;
+  status: string;
+  resultingVersion: number | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface ReviewEvent {
+  id: string;
+  sequence: number;
+  docId: string;
+  actorType: "human" | "agent" | "system";
+  actorId: string;
+  type: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface ReviewState {
+  comments: ReviewComment[];
+  runs: ReiterationRun[];
+  events: ReviewEvent[];
+}
+
+export interface AgentRouting {
+  recommendedAgentId: string | null;
+  candidateAgentIds: string[];
+  ambiguous: boolean;
+}

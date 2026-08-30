@@ -1,11 +1,15 @@
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 import type {
+  AgentRouting,
   ChainView,
   ConcordDoc,
   DocView,
   Human,
   PendingConflict,
   PlannedTask,
+  ReiterationRun,
+  ReviewComment,
+  ReviewState,
   RunReport,
 } from "./types";
 
@@ -168,4 +172,39 @@ export const api = {
       "/api/concord/docs/" + encodeURIComponent(docId) + "/resolve",
       json(body),
     ),
+
+  // -------------------------------------------------------- review loop
+  reviewState: (docId: string, agentId: string) =>
+    asHuman<ReviewState>(
+      "/api/review/docs/" +
+        encodeURIComponent(docId) +
+        "/comments?agentId=" +
+        encodeURIComponent(agentId),
+    ),
+  routeFor: (docId: string, agentId: string, startLine: number, endLine: number) =>
+    asHuman<AgentRouting>(
+      "/api/review/docs/" +
+        encodeURIComponent(docId) +
+        "/route?agentId=" +
+        encodeURIComponent(agentId) +
+        "&startLine=" +
+        startLine +
+        "&endLine=" +
+        endLine,
+    ),
+  addComment: (
+    docId: string,
+    body: { startLine: number; endLine: number; body: string; targetAgentId?: string },
+  ) =>
+    asHuman<{ comment: ReviewComment }>(
+      "/api/review/docs/" + encodeURIComponent(docId) + "/comments",
+      json(body),
+    ),
+  resolveComment: (commentId: string) =>
+    asHuman<{ comment: ReviewComment }>(
+      "/api/review/comments/" + encodeURIComponent(commentId) + "/resolve",
+      { method: "POST" },
+    ),
+  reiterate: (commentIds: string[]) =>
+    asHuman<{ runs: ReiterationRun[] }>("/api/review/reiterations", json({ commentIds })),
 };
