@@ -69,7 +69,13 @@ export async function createApp(
       // warrant-bound agentId through the PDP or a per-human session token;
       // one Authorization header cannot carry the shared token AND the
       // identity that actually decides the request.
-      request.url.startsWith("/api/concord/")
+      request.url.startsWith("/api/concord/") ||
+      // The review routes are the same argument again: each resolves a
+      // per-human session token through the Registry, or a warrant-bound
+      // agentId through the PDP. Gating them on the shared demo token would
+      // reject the stronger identity, because one Authorization header cannot
+      // carry both.
+      request.url.startsWith("/api/review/")
     ) {
       return;
     }

@@ -95,6 +95,44 @@ const comment = (token: string, payload: Record<string, unknown>) =>
   });
 
 describe("review routes over HTTP", () => {
+  it("accepts a session token even when a shared demo token is configured", async () => {
+    // Regression: the review routes were not in the shared-token exemption
+    // list, so with APP_AUTH_TOKEN set the gate rejected the per-human session
+    // token before requireHuman ever saw it. Every other test runs without a
+    // shared token, which is exactly why this went unnoticed until the app was
+    // started for real.
+    await app.close();
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: dir,
+      AGENT_WORKSPACE_ROOT: path.join(dir, "workspaces"),
+      CODEX_HOME: path.join(dir, "codex-home"),
+      AEGIS_ENABLED: "false",
+      APP_AUTH_TOKEN: "a-strong-shared-demo-token",
+    } as NodeJS.ProcessEnv);
+    app = await createApp(config, service, undefined, plane, runner);
+
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const token = await login("alice");
+    await write(alice.agentId, 0, "# Changelog\n\n- entry one");
+
+    const created = await comment(token, {
+      startLine: 3,
+      endLine: 3,
+      body: "works with a shared token configured",
+    });
+    expect(created.statusCode).toBe(201);
+
+    // And a request with neither token is still refused.
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/review/docs/" + encodeURIComponent(SHARED) + "/comments",
+      payload: { startLine: 3, endLine: 3, body: "no identity" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+  });
+
   it("requires a session; a comment cannot be left anonymously", async () => {
     await planShared();
     const denied = await app.inject({
