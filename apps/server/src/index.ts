@@ -10,13 +10,22 @@ import { reapAllRuntimeContainers } from "./aegis/reap.js";
 import { WarrantPlane } from "./warrant/index.js";
 
 const config = loadConfig();
-await writeCodexConfig(config);
 
 const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
 const workspaces = new WorkspaceManager(config.workspaceRoot);
 const aegis = config.aegisEnabled ? await Aegis.bootstrap(config) : undefined;
+
+// Written after AEGIS, because where Codex sends its requests depends on
+// whether the broker is up. With it, the container is told about the broker and
+// never learns the real upstream; without it, nothing changes from the baseline.
+await writeCodexConfig(
+  config,
+  aegis?.egress ? config.aegisBrokerUrl : undefined,
+);
 const runner = createRunner(config, aegis);
-const warrantPlane = await WarrantPlane.bootstrap(config);
+// One chain for both planes, so an egress crossing and the authorization that
+// permitted it are neighbours in the same verifiable record.
+const warrantPlane = await WarrantPlane.bootstrap(config, aegis?.audit);
 const service = new AgentService(config, store, workspaces, runner);
 await service.initialize();
 

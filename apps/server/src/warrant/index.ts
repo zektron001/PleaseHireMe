@@ -60,7 +60,18 @@ export class WarrantPlane {
     this.reconciler = new WorkspaceReconciler(this.docs);
   }
 
-  static async bootstrap(config: AppConfig): Promise<WarrantPlane> {
+  /**
+   * `sharedAudit` is AEGIS's chain. The module header claims authorization and
+   * safety records share one verifiable chain, and until now they did not: each
+   * plane built its own AuditLog over its own file, so an egress crossing and
+   * the authorization behind it landed in different chains and no single view
+   * could show both. Passing AEGIS's log in makes the claim true. Tests that
+   * build a plane on its own still get their own chain.
+   */
+  static async bootstrap(
+    config: AppConfig,
+    sharedAudit?: AuditLog,
+  ): Promise<WarrantPlane> {
     const registry = new Registry();
     const workspaces = new SubtaskWorkspaceManager(
       path.join(config.workspaceRoot, "subtasks"),
@@ -74,7 +85,9 @@ export class WarrantPlane {
       Date.now,
       workspaces,
     );
-    const audit = new AuditLog(
+    const audit =
+      sharedAudit ??
+      new AuditLog(
       path.join(config.dataDirectory, "warrant-audit.jsonl"),
       new Redactor([config.arkApiKey, config.authToken]),
       config.aegisCaptureLevel,
@@ -83,7 +96,7 @@ export class WarrantPlane {
         maxAgeMs: config.aegisRetentionMaxAgeMs,
       },
     );
-    await audit.initialize();
+    if (!sharedAudit) await audit.initialize();
 
     // Two mock humans, as Track B requires. Section 8 blesses mock users.
     registry.addHuman("alice", "Alice Chen");

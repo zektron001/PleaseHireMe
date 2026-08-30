@@ -193,13 +193,17 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const visibleEvents: ChainEvent[] = useMemo(() => {
     const events = chain?.events ?? [];
     if (!selected) return [...events].reverse().slice(0, 40);
-    // Everything about this document, plus every denial: a denial the judge
-    // cannot see is the one thing this panel exists to prevent.
+    // Everything about this document, plus every denial, plus the runtime gates.
+    // A denial the judge cannot see is the one thing this panel exists to
+    // prevent; and the AEGIS gates (admission, confinement, egress, attestation)
+    // carry no `resource`, so filtering on that alone would hide the moment the
+    // Agent actually crossed a boundary.
     return [...events]
       .reverse()
       .filter(
         (event) =>
           event.verdict.decision === "Deny" ||
+          event.gate.startsWith("G") ||
           String(event.evidence?.["resource"] ?? "").includes(selected),
       )
       .slice(0, 40);

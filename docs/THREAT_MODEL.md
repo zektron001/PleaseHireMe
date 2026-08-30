@@ -16,7 +16,7 @@ honest status per control — **implemented**, **partial**, or **not built**.
 | --- | --- |
 | **Judged track** | B — The Bouncer. See [`WARRANT_TRACK_B.md`](WARRANT_TRACK_B.md). |
 | **Retained, not claimed** | C — Kill Switch. See [`MIDDLEWARE_ARCHITECTURE.md`](MIDDLEWARE_ARCHITECTURE.md). |
-| **Evidence** | `npm run check` — typecheck, 246 tests, build. |
+| **Evidence** | `npm run check` — typecheck, 255 tests, build. |
 
 ---
 
@@ -184,8 +184,8 @@ Statuses are deliberately conservative: **implemented** means there is a passing
 | ID | Risk | Why it remains | Compensating control | Production path |
 | --- | --- | --- | --- | --- |
 | **RR-1** | **Human sign-in is mock.** Anyone who can reach the server can be `alice`. | §8 permits mock users; the judged property is what happens *after* delegation. | Loopback binding; shared token for baseline routes | OIDC / Volcengine IAM |
-| **RR-2** | **Egress broker not built.** T4/T5 network confinement is detective, not topological. **And it blocks live hardened runs entirely:** KS-7 withholds `ARK_API_KEY` from the container because the broker was meant to hold it, so with no broker the Agent cannot reach the model at all. The server now says so at startup instead of failing later with `Missing environment variable: ARK_API_KEY`. | Ran out of build time; specified in §4.4 of the Track C doc. | `KS-1` rules still deny at G3; the `aegis-egress` network is now created at bootstrap, dedicated but **not** `--internal` | `--internal` network + broker sidecar |
-| **RR-3** | **Partly closed.** A live containerised turn now runs end to end and CONCORD commits its edits - verified, `written` v2. Under the FULL hardened profile it still cannot complete, for the RR-2 reason above and no other. Two blockers were found by trying it and are fixed: the `aegis-egress` network never existed (exit 125), and KS-3's blanket read-only home stopped Codex writing its own sessions. | argv-level tests cannot see either failure - `--network aegis-egress` looks the same whether or not that network exists | 13 argv-level isolation tests, plus a live run | Broker, then re-run under the full profile |
+| **RR-2** | **Egress confinement is credential-based, not topological.** The broker is built: the container holds a per-run capability rather than the Ark key, and every crossing is recorded. But the network is a dedicated bridge, not `--internal`, so the Agent could still *reach* other hosts - it simply has no credential worth taking there, and no way to obtain one. | Measured, not assumed: on an `--internal` network the container reaches nothing at all, the host broker included (`ENETUNREACH`), so a host-process broker cannot serve one. | Capability dies with the run; key never enters the namespace; `KS-1` rules still deny at G3 | R11 - run the broker as a container attached to both the internal network and a routable one, then turn on `--internal` |
+| ~~**RR-3**~~ | **Closed.** A real Codex turn runs under the full profile - dedicated network, read-only rootfs, seccomp, pinned config, no key in the namespace - and CONCORD commits its edit. Three blockers were found by trying it: the network was never created (exit 125), KS-3's blanket read-only home stopped Codex writing its own sessions, and KS-7 had nothing to hand the key to. | argv-level tests could not see any of them: `--network aegis-egress` looks identical whether or not that network exists | 13 argv-level tests, 9 broker tests, and a live hardened run | |
 | **RR-4** | Container escape via kernel 0-day | Namespaces share one kernel | seccomp, cap-drop, read-only rootfs | gVisor, Kata, Firecracker, veFaaS |
 | **RR-5** | Semantic exfiltration inside a legitimate Ark request | Ark must stay reachable | Egress volume cap | DLP at the broker |
 | **RR-6** | Self-reported event stream (TB-6) | The model narrates its own actions | Prevention never depends on it | eBPF/auditd from outside the namespace |
@@ -196,7 +196,7 @@ Statuses are deliberately conservative: **implemented** means there is a passing
 ## 7. What a reviewer should check
 
 ```bash
-npm run check          # typecheck + 246 tests + build
+npm run check          # typecheck + 255 tests + build
 npm run demo:warrant   # the delegation story, 9 beats, no Ark key needed
 ```
 

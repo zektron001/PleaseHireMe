@@ -22,7 +22,7 @@
 >
 > ```bash
 > npm run demo:warrant   # the whole Track B story in your terminal, no Ark key needed
-> npm run check          # typecheck + 246 tests + build
+> npm run check          # typecheck + 255 tests + build
 > ```
 >
 > **Team reference + roadmap:** [`docs/MASTER.md`](docs/MASTER.md) — start here.

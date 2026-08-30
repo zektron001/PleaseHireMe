@@ -100,6 +100,15 @@ export function hardenContainerArgs(
   args = dropFlagWithValue(args, "--network");
 
   // KS-7 - the raw Ark key never enters the container environment.
+  //
+  // It is REPLACED rather than removed. Deleting it left Codex with no
+  // credential at all and no broker to get one from, so it died on
+  // "Missing environment variable: ARK_API_KEY" - a hardened profile that could
+  // not run. The container now holds a per-run capability in the same variable:
+  // the client puts whatever ARK_API_KEY contains into the Authorization
+  // header, the broker recognises the capability there, and attaches the real
+  // key on the far side. What sits inside the namespace is a token that buys
+  // one run's calls to one endpoint and dies with the run.
   args = dropFlagWithValue(args, "--env", "ARK_API_KEY");
 
   // KS-3 - pin the Codex CONFIGURATION read-only, not the whole home.
@@ -132,6 +141,12 @@ export function hardenContainerArgs(
   const injected: string[] = [
     "--network",
     options.networkMode,
+    // The broker runs on the host. Without this the container cannot resolve
+    // host.docker.internal on Docker Engine, only on Docker Desktop.
+    "--add-host",
+    "host.docker.internal:host-gateway",
+    "--env",
+    "ARK_API_KEY=" + options.runToken,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,noexec,nosuid,size=" + (options.tmpfsSize ?? "64m"),
@@ -161,6 +176,10 @@ export function profileEvidence(args: readonly string[]): Record<string, string 
     codexConfigPinned: args.some(
       (a) => a.includes("dst=/codex-home/config.toml") && a.includes("readonly"),
     ),
+    // True only when the value in the namespace is a capability, not the key.
+    keyReplacedByCapability:
+      !args.includes("ARK_API_KEY") &&
+      args.some((a) => a.startsWith("ARK_API_KEY=")),
     arkKeyInEnv: args.includes("ARK_API_KEY"),
   };
 }

@@ -29,6 +29,7 @@ import {
   type BrokerReadiness,
   type NetworkReadiness,
 } from "./sandbox/network.js";
+import { EgressBroker, type EgressEvent } from "./egress/broker.js";
 import { KillLatch } from "./state/latch.js";
 import { SECCOMP_STRICT } from "./sandbox/seccomp.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -108,6 +109,26 @@ export class Aegis {
   /** Filled at bootstrap. Surfaced in status() so the gap is visible, not silent. */
   network: NetworkReadiness | null = null;
   broker: BrokerReadiness | null = null;
+  egress: EgressBroker | null = null;
+
+  /**
+   * Live run capabilities. A token is only worth something while the run that
+   * minted it is still going, which is what makes it a capability rather than a
+   * second, worse API key.
+   */
+  private readonly capabilities = new Map<string, { agentId: string; runId: string }>();
+
+  grantCapability(token: string, agentId: string, runId: string): void {
+    this.capabilities.set(token, { agentId, runId });
+  }
+
+  revokeCapability(token: string): void {
+    this.capabilities.delete(token);
+  }
+
+  resolveCapability(token: string): { agentId: string; runId: string } | null {
+    return this.capabilities.get(token) ?? null;
+  }
 
   /**
    * Can a hardened container actually complete a turn right now?
@@ -116,6 +137,30 @@ export class Aegis {
    * the broker is up. Stated here once, in one place, rather than discovered as
    * a misleading error at the end of a run.
    */
+  /** Records every egress decision in the same chain as everything else. */
+  recordEgress(event: EgressEvent): void {
+    this.audit.append({
+      runId: event.runId,
+      agentId: event.agentId,
+      gate: "G3.interception",
+      verdict: {
+        decision: event.decision,
+        ruleId: event.ruleId,
+        reason: event.reason,
+        gate: "G3.interception",
+        policyVersion: this.engine.policyVersion,
+        policyHash: this.engine.policyHash,
+        severity: event.decision === "Deny" ? "warn" : "info",
+      },
+      evidence: {
+        method: event.method,
+        path: event.path,
+        status: event.status,
+        bytes: event.bytes,
+      },
+    });
+  }
+
   get liveRunPossible(): { ok: boolean; reason: string } {
     if (this.network && this.network.status === "unavailable") {
       return {
@@ -211,7 +256,28 @@ export class Aegis {
     // KS-1 - the network named in the profile has to actually exist, or every
     // hardened container dies at exit 125 before a single control is exercised.
     aegis.network = await ensureNetwork(config.containerEngine, config.aegisNetworkMode);
-    aegis.broker = await probeBroker(config.aegisBrokerUrl);
+
+    // KS-1 - the broker the profile has always claimed. Bound on all interfaces
+    // because the peer is a container on a bridge network, not this host's
+    // loopback; the capability check is what guards it, not the interface.
+    const egress = new EgressBroker({
+      upstreamBaseUrl: config.arkBaseUrl,
+      apiKey: config.arkApiKey,
+      resolveToken: (token) => aegis.resolveCapability(token),
+      onEgress: (event) => aegis.recordEgress(event),
+    });
+    try {
+      await egress.start(config.aegisBrokerPort);
+      aegis.egress = egress;
+    } catch {
+      // A port already in use must not take the control plane down; the
+      // readiness probe below will report the consequence honestly.
+      aegis.egress = null;
+    }
+
+    aegis.broker = await probeBroker(
+      "http://127.0.0.1:" + config.aegisBrokerPort + "/aegis/health",
+    );
     return aegis;
   }
 
