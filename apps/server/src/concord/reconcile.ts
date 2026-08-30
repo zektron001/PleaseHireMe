@@ -106,6 +106,8 @@ export class WorkspaceReconciler {
     workspacePath: string,
     agentId: string,
     sharedPaths: readonly string[],
+    /** The Agent's own checkpoint message and Run id for this turn. */
+    checkpoint?: { message?: string | null; runId?: string | null },
   ): Promise<ReconcileResult[]> {
     const results: ReconcileResult[] = [];
     for (const docId of sharedPaths) {
@@ -141,7 +143,10 @@ export class WorkspaceReconciler {
         continue;
       }
 
-      const outcome = await this.store.write(docId, agentId, checkout.version, content);
+      const outcome = await this.store.write(docId, agentId, checkout.version, content, {
+        ...(checkpoint?.message ? { message: checkpoint.message } : {}),
+        runId: checkpoint?.runId ?? null,
+      });
       if (outcome.status === "written" || outcome.status === "merged") {
         // The merged text is what actually landed, so the workspace is brought
         // up to it. Leaving the Agent's own version on disk would make its next

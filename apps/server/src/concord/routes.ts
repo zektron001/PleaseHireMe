@@ -203,6 +203,24 @@ export async function registerConcordRoutes(
     return reply.code(200).send({ released: outcome.status === "released", outcome });
   });
 
+  /**
+   * The Agent-authored commit log. Read through readHistory so the same
+   * authorization that guards history guards this - a caller cannot learn who
+   * wrote what in a document its warrant does not cover.
+   */
+  app.get("/api/concord/docs/:docId/contributions", async (request) => {
+    const { docId } = docParams.parse(request.params);
+    const { agentId } = agentQuery.parse(request.query);
+    const result = store.readHistory(docId, agentId);
+    if (result.status === "denied") throw new HttpError(403, result.reason);
+    if (result.status === "missing") throw new HttpError(404, "Document not found");
+    return {
+      id: docId,
+      version: result.doc.version,
+      contributions: store.contributionsOf(docId),
+    };
+  });
+
   app.get("/api/concord/docs/:docId/history", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);

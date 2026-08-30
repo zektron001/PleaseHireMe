@@ -17,6 +17,10 @@ import { z } from "zod";
 import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "./index.js";
 import { workspaceResource } from "./resources.js";
+import {
+  parseCheckpoint,
+  withCheckpointInstruction,
+} from "../concord/checkpoint.js";
 import { WarrantBindingError } from "./binding.js";
 
 const loginBody = z.object({ handle: z.string().trim().min(1).max(40) });
@@ -185,7 +189,10 @@ export async function registerWarrantRoutes(
 
     let bound;
     try {
-      bound = plane.binder.bind(subtask.agentId, body.prompt);
+      bound = plane.binder.bind(
+        subtask.agentId,
+        withCheckpointInstruction(body.prompt),
+      );
     } catch (error) {
       if (error instanceof WarrantBindingError) {
         plane.record(error.decision);
@@ -206,10 +213,12 @@ export async function registerWarrantRoutes(
     plane.orchestrator.setState(subtaskId, "in_progress");
     try {
       const result = await runner.run(bound.request);
+      const checkpoint = parseCheckpoint(result.output);
       const reconciled = await plane.reconciler.reconcile(
         workspacePath,
         subtask.agentId,
         shared,
+        { message: checkpoint, runId: subtaskId },
       );
       return reply.code(200).send({
         subtaskId,
@@ -219,6 +228,7 @@ export async function registerWarrantRoutes(
         usage: result.usage,
         materialized,
         reconciled,
+        checkpoint,
       });
     } catch (error) {
       plane.orchestrator.setState(subtaskId, "assigned");
@@ -229,6 +239,7 @@ export async function registerWarrantRoutes(
         workspacePath,
         subtask.agentId,
         shared,
+        { message: null, runId: subtaskId },
       );
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(502).send({ subtaskId, error: message, materialized, reconciled });
