@@ -11,6 +11,7 @@ import { z } from "zod";
 import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
+import { ConsultationService } from "./consultation.js";
 import { runReiteration } from "./reiteration.js";
 import { ReviewService } from "./service.js";
 
@@ -31,6 +32,16 @@ const createCommentBody = z.object({
 const reiterateBody = z.object({
   commentIds: z.array(z.string().uuid()).min(1).max(50),
 });
+const consultBody = z.object({
+  docId: z.string().trim().min(1).max(200),
+  /** The Agent whose warrant authorises reading this document, as elsewhere. */
+  agentId: z.string().trim().min(1),
+  startLine: z.number().int().min(1),
+  endLine: z.number().int().min(1),
+  question: z.string().trim().min(1).max(3_000),
+  targetAgentId: z.string().trim().min(1).optional(),
+});
+const consultParams = z.object({ id: z.string().uuid() });
 
 function bearerToken(request: FastifyRequest): string | undefined {
   const header = request.headers.authorization;
@@ -122,6 +133,71 @@ export async function registerReviewRoutes(
       ),
     );
     return reply.code(202).send({ runs });
+  });
+
+  const consultations = new ConsultationService(
+    plane,
+    plane.docs,
+    plane.reconciler,
+    runner,
+  );
+
+  /**
+   * Explanation only. The responsible Agent is resolved from provenance unless
+   * the reviewer names one, and the same rule applies as for comments: a named
+   * Agent must actually have written the lines.
+   */
+  app.post("/api/review/consultations", async (request, reply) => {
+    const human = requireHuman(request);
+    const body = consultBody.parse(request.body);
+    if (body.endLine < body.startLine) {
+      throw new HttpError(400, "endLine precedes startLine");
+    }
+
+    const routing = review.routeFor(
+      body.docId,
+      body.agentId,
+      body.startLine,
+      body.endLine,
+    );
+    const agentId = body.targetAgentId ?? routing.recommendedAgentId;
+    if (!agentId) {
+      throw new HttpError(
+        409,
+        routing.ambiguous
+          ? "Several Agents changed these lines; name the one to ask"
+          : "No Agent has changed these lines; name the one to ask",
+      );
+    }
+    if (
+      body.targetAgentId &&
+      routing.candidateAgentIds.length > 0 &&
+      !routing.candidateAgentIds.includes(body.targetAgentId)
+    ) {
+      throw new HttpError(400, "That Agent did not write the selected lines");
+    }
+
+    const consultation = await consultations.ask({
+      docId: body.docId,
+      agentId,
+      humanId: human.id,
+      startLine: body.startLine,
+      endLine: body.endLine,
+      question: body.question,
+    });
+    return reply.code(200).send({ consultation });
+  });
+
+  app.get("/api/review/consultations/:id", async (request) => {
+    requireHuman(request);
+    const { id } = consultParams.parse(request.params);
+    return { consultation: consultations.get(id) };
+  });
+
+  app.get("/api/review/docs/:docId/consultations", async (request) => {
+    requireHuman(request);
+    const { docId } = docParams.parse(request.params);
+    return { consultations: consultations.list(docId) };
   });
 
   return review;

@@ -134,6 +134,8 @@ export async function runReiteration(
   if (subtask.state === "in_progress") {
     throw new HttpError(409, "That Agent is already running");
   }
+  // Claimed in the same synchronous step that checked it; see consultation.ts.
+  deps.plane.orchestrator.setState(subtask.id, "in_progress");
 
   const run = deps.review.openRun(docId, agentId, humanId, comments, doc.version);
   const prompt = compileReiterationPrompt(docId, doc.content, doc.version, comments);
@@ -144,14 +146,15 @@ export async function runReiteration(
   } catch (error) {
     if (error instanceof WarrantBindingError) {
       deps.plane.record(error.decision);
+      deps.plane.orchestrator.setState(subtask.id, "assigned");
       return deps.review.closeRun(run.id, "denied", null, error.message);
     }
+    deps.plane.orchestrator.setState(subtask.id, "assigned");
     throw error;
   }
 
   const workspacePath = bound.request.workspacePath;
   await deps.reconciler.materialize(workspacePath, agentId, [docId]);
-  deps.plane.orchestrator.setState(subtask.id, "in_progress");
 
   try {
     const result = await deps.runner.run(bound.request);

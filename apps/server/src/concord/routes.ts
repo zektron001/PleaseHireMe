@@ -204,6 +204,50 @@ export async function registerConcordRoutes(
   });
 
   /**
+   * Per-line attribution - who last changed each line.
+   *
+   * Gated on readHistory rather than reading provenanceOf directly: the store's
+   * provenance reader is deliberately ungated for internal callers, so the
+   * authorization has to be applied here or attribution would leak for
+   * documents a warrant does not cover.
+   */
+  app.get("/api/concord/docs/:docId/blame", async (request) => {
+    const { docId } = docParams.parse(request.params);
+    const { agentId } = agentQuery.parse(request.query);
+    const gate = store.readHistory(docId, agentId);
+    if (gate.status === "denied") throw new HttpError(403, gate.reason);
+    if (gate.status === "missing") throw new HttpError(404, "Document not found");
+
+    const doc = gate.doc;
+    const provenance = store.provenanceOf(docId);
+    const contributions = store.contributionsOf(docId);
+    const byId = new Map(contributions.map((entry) => [entry.id, entry]));
+    const lines = doc.content.length === 0 ? [] : doc.content.split("\n");
+
+    return {
+      id: docId,
+      version: doc.version,
+      lines: lines.map((text, index) => {
+        const entry = provenance[index];
+        const contribution = entry?.contributionId
+          ? byId.get(entry.contributionId)
+          : undefined;
+        return {
+          lineNumber: index + 1,
+          text,
+          lineId: entry?.lineId ?? null,
+          // null means the line predates any Agent write. It is not "unknown":
+          // seeded and human-authored content is attributed to nobody on purpose.
+          lastModifiedByAgentId: entry?.lastModifiedByAgentId ?? null,
+          contributionId: entry?.contributionId ?? null,
+          atVersion: entry?.resultingDocumentVersion ?? null,
+          message: contribution?.summary ?? null,
+        };
+      }),
+    };
+  });
+
+  /**
    * The Agent-authored commit log. Read through readHistory so the same
    * authorization that guards history guards this - a caller cannot learn who
    * wrote what in a document its warrant does not cover.
