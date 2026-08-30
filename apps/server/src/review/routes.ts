@@ -52,8 +52,11 @@ export async function registerReviewRoutes(
   app: FastifyInstance,
   plane: WarrantPlane,
   runner: AgentRunner | null,
-  review: ReviewService = new ReviewService(plane.docs),
+  /** Where review state is persisted. Omitted in tests: memory only. */
+  persistPath?: string,
+  review: ReviewService = new ReviewService(plane.docs, Date.now, { persistPath }),
 ): Promise<ReviewService> {
+  await review.initialize();
   const requireHuman = (request: FastifyRequest) => {
     const human = plane.whoami(bearerToken(request));
     if (!human) throw new HttpError(401, "Sign in to continue");

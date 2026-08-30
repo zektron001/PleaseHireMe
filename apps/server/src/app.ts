@@ -1,3 +1,4 @@
+import path from "node:path";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -156,7 +157,12 @@ export async function createApp(
   if (warrantPlane) {
     await registerWarrantRoutes(app, warrantPlane, runner);
     await registerConcordRoutes(app, warrantPlane);
-    await registerReviewRoutes(app, warrantPlane, runner ?? null);
+    await registerReviewRoutes(
+      app,
+      warrantPlane,
+      runner ?? null,
+      path.join(config.dataDirectory, "review-state.json"),
+    );
   }
 
   if (config.nodeEnv === "production") {

@@ -242,3 +242,20 @@ export interface AgentRouting {
   candidateAgentIds: string[];
   ambiguous: boolean;
 }
+
+export interface BlameLine {
+  lineNumber: number;
+  text: string;
+  lineId: string | null;
+  /** null means the line predates any Agent write, not that it is unknown. */
+  lastModifiedByAgentId: string | null;
+  contributionId: string | null;
+  atVersion: number | null;
+  message: string | null;
+}
+
+export interface BlameView {
+  id: string;
+  version: number;
+  lines: BlameLine[];
+}

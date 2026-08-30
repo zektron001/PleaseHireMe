@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { HttpError } from "../errors.js";
 import { splitLines } from "../concord/merge.js";
 import { responsibleAgents } from "../concord/provenance.js";
@@ -22,6 +24,18 @@ export function hashText(text: string): string {
 /** Lines [start, end] of `content`, 1-based inclusive. */
 export function sliceLines(content: string, start: number, end: number): string {
   return splitLines(content).slice(start - 1, end).join("\n");
+}
+
+export interface ReviewStoreOptions {
+  /** Where to persist review state. Omitted in tests: memory only. */
+  readonly persistPath?: string | undefined;
+}
+
+interface PersistedReview {
+  readonly version: 1;
+  readonly comments: readonly ReviewComment[];
+  readonly runs: readonly ReiterationRun[];
+  readonly events: readonly ReviewEvent[];
 }
 
 export interface CreateCommentInput {
@@ -53,10 +67,71 @@ export class ReviewService {
   private readonly events: ReviewEvent[] = [];
   private sequence = 0;
 
+  private persistQueue: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly docs: SharedDocStore,
     private readonly now: () => number = Date.now,
+    private readonly options: ReviewStoreOptions = {},
   ) {}
+
+  /**
+   * Restores review state. A review conversation that vanishes when the server
+   * restarts is not a review conversation, and the comments carry the only
+   * record of what a human asked for.
+   */
+  async initialize(): Promise<void> {
+    const file = this.options.persistPath;
+    if (!file) return;
+    await mkdir(path.dirname(file), { recursive: true });
+    let raw: string;
+    try {
+      raw = await readFile(file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    const parsed = JSON.parse(raw) as PersistedReview;
+    if (parsed.version !== 1 || !Array.isArray(parsed.comments)) {
+      throw new Error("Unsupported review state format");
+    }
+    for (const comment of parsed.comments) {
+      this.comments.set(comment.id, structuredClone(comment));
+    }
+    for (const run of parsed.runs ?? []) this.runs.set(run.id, structuredClone(run));
+    this.events.push(...(parsed.events ?? []).map((event) => structuredClone(event)));
+    this.sequence = this.events.reduce(
+      (max, event) => Math.max(max, event.sequence),
+      0,
+    );
+  }
+
+  /** Atomic replace, the same shape CONCORD uses for documents. */
+  private persist(): Promise<void> {
+    const file = this.options.persistPath;
+    if (!file) return Promise.resolve();
+    const payload: PersistedReview = {
+      version: 1,
+      comments: [...this.comments.values()],
+      runs: [...this.runs.values()],
+      events: this.events,
+    };
+    const operation = this.persistQueue.then(async () => {
+      const temporary = file + ".tmp";
+      await writeFile(temporary, JSON.stringify(payload, null, 2) + "\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(temporary, file);
+    });
+    this.persistQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  /** Awaits any queued write. Tests and shutdown use this. */
+  flush(): Promise<void> {
+    return this.persistQueue;
+  }
 
   private stamp(): string {
     return new Date(this.now()).toISOString();
@@ -168,6 +243,7 @@ export class ReviewService {
       updatedAt: at,
     };
     this.comments.set(comment.id, comment);
+    void this.persist();
     this.append(
       input.docId,
       "human",
@@ -229,6 +305,7 @@ export class ReviewService {
     if (!comment) throw new HttpError(404, "Comment not found");
     comment.status = status;
     comment.updatedAt = this.stamp();
+    void this.persist();
     if (status === "stale") {
       this.append(
         comment.docId,
@@ -325,6 +402,7 @@ export class ReviewService {
       completedAt: null,
     };
     this.runs.set(run.id, run);
+    void this.persist();
     for (const comment of comments) {
       const stored = this.comments.get(comment.id);
       if (stored) {
@@ -388,6 +466,7 @@ export class ReviewService {
         status +
         (resultingVersion ? " at version " + resultingVersion : ""),
     );
+    void this.persist();
     return structuredClone(run);
   }
 }

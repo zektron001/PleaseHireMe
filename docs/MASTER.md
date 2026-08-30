@@ -11,7 +11,7 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **255 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **324 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
 | **See it in a browser** | sidebar → **Middleware console** |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
@@ -171,6 +171,8 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | D12 | Documents persist; presence; conflict resolution; agent write-through | CONCORD | 31 tests; R3/R4/R5/R6 below |
 | D13 | Middleware console in the browser | web | R7; sidebar → Middleware console |
 | D14 | Concurrency outcomes in the audit chain (`C.concord`) | CONCORD | C7 closed |
+| D15 | Line provenance + Agent-authored checkpoint commits | CONCORD | 29 tests; blame and a commit log per document |
+| D16 | Review loop: comment, consult, re-iterate, resolve | CONCORD | 35 tests incl. 10 over real HTTP |
 
 ### Open — claim a row
 
@@ -187,6 +189,9 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | **R9** | **Rehearse the 3-minute demo end to end** | everyone | `@___` | `TODO` | — | Day 3. Must land under 3:00. |
 | **R10** | **Real auth for humans (OIDC)** | WARRANT | `@___` | `TODO` | — | RR-1 / L1. *Probably out of scope for 3 days — decide by Day 2.* |
 | **R11** | **Broker as a dual-homed sidecar**, so `--internal` can be turned on | AEGIS | `@___` | `TODO` | 2026-08-30 | The last step to topological confinement. Measured: on an `--internal` network a container reaches *nothing*, the host broker included (`ENETUNREACH`), so an in-process broker cannot serve one. The broker has to run as a container attached to BOTH the internal network and a routable one. Today the Agent could still reach any host - it just has no credential worth carrying there. |
+
+| **R12** | **Live Ark run of the review loop** | CONCORD | `@___` | `TODO` | 2026-08-30 | Every review test stubs Codex. A real model has never revised code through re-iteration or answered a consultation. The path is the same one R2/R3 already proved with a live turn, so this is a rehearsal item, not a build item. |
+| **R13** | **Persist consultations** | CONCORD | `@___` | `TODO` | 2026-08-30 | Comments, runs and review events persist; consultations do not. Same `persistPath` pattern as `ReviewService`. Small. |
 
 ### Priority if time runs short
 
@@ -291,6 +296,8 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
+- `2026-08-30` · `@jemy` · **Review loop landed (D16).** A reviewer selects lines, CONCORD provenance says which Agent wrote them, and the comment is routed there. Consultation is explanation-only *structurally* - it never reconciles, so a hostile Agent that rewrites the file during one changes nothing (test at the HTTP boundary proves it). Re-iteration returns through `store.write()`, so merge/conflict/denied are unchanged. Comments become `addressed`, never `resolved`: only a human resolves. 324 tests. **Not yet run against a live Ark model - see R12.**
+- `2026-08-30` · `@jemy` · **Line provenance + Agent checkpoint commits (D15).** Every line carries the Agent that last changed it, reconciled inside the commit funnel with the existing `diffLines` - no new dependency. Agents name their own commits via `CONCORD-COMMIT:`, so the log reads like a history rather than a change counter. Two Agents committing to one file from the same base merge, and each line keeps its own author. Also fixed a real race: both run paths checked "already running" and claimed the slot only after an await.
 - `2026-08-30` · `@jemy` · **Egress broker built (R1), and a real turn now runs under the full hardened profile (R2).** The container holds a per-run capability instead of the Ark key; the broker swaps in the credential and records every crossing. Both planes now share ONE audit chain, so an egress crossing and the authorization behind it are neighbours - the module header had claimed this and it was not true. Topological confinement still needs R11.
 - `2026-08-30` · `@jemy` · AEGIS: network now created at bootstrap; KS-3 pins `config.toml` rather than the whole Codex home (the blanket mount stopped Codex writing its own sessions, so no turn could ever run). Remaining blocker for a hardened live run is **R1, the broker** - KS-7 strips the key it was meant to supply. Startup now says this out loud.
 - `2026-08-30` · `@jemy` · **AEGIS hardened profile had never run a real turn.** Found by trying it: `aegis-egress` was created by nothing (container exits 125), then Codex hit the read-only home. Unhardened, the same turn works.

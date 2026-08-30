@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, setSessionToken } from "./api";
 import type {
+  BlameView,
   ChainEvent,
   ChainView,
   ConcordDoc,
@@ -107,6 +108,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
   }, []);
 
   const [review, setReview] = useState<ReviewState | null>(null);
+  const [blame, setBlame] = useState<BlameView | null>(null);
+  const [showBlame, setShowBlame] = useState(true);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [anchorLine, setAnchorLine] = useState<number | null>(null);
 
@@ -125,6 +128,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
       if (target !== selected) setSelected(target);
       if (target) {
         setDoc(await api.doc(target, myAgent));
+        setBlame(await api.blame(target, myAgent).catch(() => null));
         if (me) {
           // A 403 here just means this human cannot review that document.
           setReview(await api.reviewState(target, myAgent).catch(() => null));
@@ -364,12 +368,21 @@ export default function Console({ onExit }: { onExit: () => void }) {
                 <span className="resource">
                   {doc.resource} · v{doc.version}
                 </span>
+                <button
+                  className="ghost blame-toggle"
+                  onClick={() => setShowBlame((value) => !value)}
+                >
+                  {showBlame ? "hide blame" : "show blame"}
+                </button>
               </div>
 
               {doc.content ? (
                 <div className="doc-lines selectable">
                   {doc.content.split("\n").map((line, index) => {
                     const number = index + 1;
+                    const line_ = blame?.lines[index];
+                    const attribution =
+                      line_ && line_.lastModifiedByAgentId ? line_ : null;
                     const inRange =
                       selection !== null &&
                       number >= selection.start &&
@@ -391,6 +404,22 @@ export default function Console({ onExit }: { onExit: () => void }) {
                         }}
                       >
                         <span className="n">{number}</span>
+                        {showBlame && (
+                          <span
+                            className="blame"
+                            title={
+                              attribution
+                                ? "Last changed by " +
+                                  attribution.lastModifiedByAgentId +
+                                  " at v" +
+                                  attribution.atVersion +
+                                  (attribution.message ? " — " + attribution.message : "")
+                                : "Not changed by any Agent"
+                            }
+                          >
+                            {attribution ? shortId(attribution.lastModifiedByAgentId) : "—"}
+                          </span>
+                        )}
                         <span>{line || " "}</span>
                       </div>
                     );

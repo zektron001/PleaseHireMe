@@ -325,6 +325,27 @@
   gap: 12px;
 }
 
+/* With blame shown the row gains an attribution gutter between the two. */
+.doc-lines div:has(.blame) {
+  grid-template-columns: 30px 74px minmax(0, 1fr);
+}
+
+.blame {
+  overflow: hidden;
+  color: #9c9a90;
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+  cursor: help;
+}
+
+.blame-toggle {
+  margin-left: 10px;
+  font-size: 11px;
+}
+
 .doc-lines .n {
   color: #b4b1a6;
   text-align: right;

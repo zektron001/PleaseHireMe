@@ -1,6 +1,7 @@
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 import type {
   AgentRouting,
+  BlameView,
   ChainView,
   ConcordDoc,
   DocView,
@@ -204,6 +205,13 @@ export const api = {
     asHuman<{ comment: ReviewComment }>(
       "/api/review/comments/" + encodeURIComponent(commentId) + "/resolve",
       { method: "POST" },
+    ),
+  blame: (docId: string, agentId: string) =>
+    request<BlameView>(
+      "/api/concord/docs/" +
+        encodeURIComponent(docId) +
+        "/blame?agentId=" +
+        encodeURIComponent(agentId),
     ),
   reiterate: (commentIds: string[]) =>
     asHuman<{ runs: ReiterationRun[] }>("/api/review/reiterations", json({ commentIds })),
