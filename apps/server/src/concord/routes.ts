@@ -44,7 +44,12 @@ export async function registerConcordRoutes(
   app: FastifyInstance,
   store: SharedDocStore,
 ): Promise<void> {
-  app.get("/api/concord/docs", async () => ({ docs: store.list() }));
+  // Scoped to the caller: an unscoped listing is a directory of every other
+  // human's documents, and it hands out the lease holder ids to release.
+  app.get("/api/concord/docs", async (request) => {
+    const { agentId } = agentQuery.parse(request.query);
+    return { docs: store.list(agentId) };
+  });
 
   app.get("/api/concord/docs/:docId", async (request) => {
     const { docId } = docParams.parse(request.params);
@@ -90,16 +95,25 @@ export async function registerConcordRoutes(
     return reply.code(result.ok ? 200 : 423).send(result);
   });
 
-  app.delete("/api/concord/docs/:docId/lease", async (request) => {
+  app.delete("/api/concord/docs/:docId/lease", async (request, reply) => {
     const { docId } = docParams.parse(request.params);
     const { agentId } = agentQuery.parse(request.query);
-    return { released: await store.releaseLease(docId, agentId) };
+    const outcome = await store.releaseLease(docId, agentId);
+    if (outcome.status === "denied") {
+      throw new HttpError(403, outcome.reason);
+    }
+    // "Not the holder" is not a denial - the lease simply is not this Agent's
+    // to drop - so it stays a 200 that reports what happened.
+    return reply.code(200).send({ released: outcome.status === "released", outcome });
   });
 
   app.get("/api/concord/docs/:docId/history", async (request) => {
     const { docId } = docParams.parse(request.params);
-    const doc = store.snapshot(docId);
-    if (!doc) throw new HttpError(404, "Document not found");
+    const { agentId } = agentQuery.parse(request.query);
+    const result = store.readHistory(docId, agentId);
+    if (result.status === "denied") throw new HttpError(403, result.reason);
+    if (result.status === "missing") throw new HttpError(404, "Document not found");
+    const doc = result.doc;
     return {
       id: doc.id,
       version: doc.version,

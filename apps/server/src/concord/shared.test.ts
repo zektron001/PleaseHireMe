@@ -156,7 +156,11 @@ describe("a shared document both Agents may write", () => {
     const history = (
       await app.inject({
         method: "GET",
-        url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/history",
+        url:
+          "/api/concord/docs/" +
+          encodeURIComponent(SHARED) +
+          "/history?agentId=" +
+          alice.agentId,
       })
     ).json().history;
 
@@ -181,6 +185,38 @@ describe("WARRANT still governs CONCORD", () => {
     await planShared();
     const res = await read("agent_nobody");
     expect(res.statusCode).toBe(403);
+  });
+
+  it("denies the history of a document the Agent may not read", async () => {
+    await planShared();
+
+    // History carries the agent and human behind every version. Gating the
+    // content but not its history would leak the cross-owner activity anyway.
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/concord/docs/" + encodeURIComponent(SHARED) + "/history?agentId=agent_nobody",
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("lists only the documents the calling Agent may read", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+
+    await write(alice.agentId, 0, "one");
+
+    const mine = await app.inject({
+      method: "GET",
+      url: "/api/concord/docs?agentId=" + alice.agentId,
+    });
+    expect(mine.json().docs.map((d: { id: string }) => d.id)).toContain(SHARED);
+
+    const theirs = await app.inject({
+      method: "GET",
+      url: "/api/concord/docs?agentId=agent_nobody",
+    });
+    expect(theirs.json().docs).toEqual([]);
   });
 
   it("honours a revocation that lands between read and write", async () => {
@@ -227,6 +263,29 @@ describe("leases over HTTP", () => {
     });
     expect(released.json().released).toBe(true);
     expect((await write(bob.agentId, 0, "bob now")).statusCode).toBe(200);
+  });
+
+  it("refuses to release a lease for an Agent with no warrant", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const bob = subtasks[1] as Planned;
+
+    await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease",
+      payload: { agentId: alice.agentId, ttlMs: 60_000 },
+    });
+
+    // A holder id is not a secret. Without authority on the release path,
+    // naming the holder would be enough to strip the lease.
+    const stripped = await app.inject({
+      method: "DELETE",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease?agentId=agent_nobody",
+    });
+    expect(stripped.statusCode).toBe(403);
+
+    // The lease survived, so Bob is still locked out.
+    expect((await write(bob.agentId, 0, "bob tries again")).statusCode).toBe(423);
   });
 });
 
