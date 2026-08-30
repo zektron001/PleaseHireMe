@@ -13,6 +13,7 @@ import { registerAegisRoutes } from "./aegis/routes.js";
 import type { WarrantPlane } from "./warrant/index.js";
 import { registerWarrantRoutes } from "./warrant/routes.js";
 import { registerConcordRoutes } from "./concord/routes.js";
+import { registerReviewRoutes } from "./review/routes.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -155,6 +156,7 @@ export async function createApp(
   if (warrantPlane) {
     await registerWarrantRoutes(app, warrantPlane, runner);
     await registerConcordRoutes(app, warrantPlane);
+    await registerReviewRoutes(app, warrantPlane, runner ?? null);
   }
 
   if (config.nodeEnv === "production") {
