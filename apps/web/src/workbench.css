@@ -1,0 +1,792 @@
+/*
+ * The workbench chrome: grid, title bar, activity bar, sashes, tabs, panel,
+ * status bar, palette.
+ *
+ * Sizes are the ones VS Code actually uses - 35px title bar, 48px activity bar,
+ * 22px status bar, 35px tabs - because the proportions are most of what makes a
+ * screenshot read as VS Code rather than "a dark IDE-ish thing".
+ *
+ * The two resizable dimensions live in custom properties on <html> so a sash
+ * drag never goes through React. See Sash.tsx.
+ */
+
+:root {
+  --sidebar-width: 300px;
+  --panel-height: 220px;
+}
+
+.workbench {
+  display: grid;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--app-bg);
+  color: var(--ink);
+  font-family: var(--ui-font);
+  font-size: var(--ui-size);
+  grid-template-columns: 48px min-content 1fr;
+  grid-template-rows: 35px minmax(0, 1fr) min-content 22px;
+  grid-template-areas:
+    "title    title    title"
+    "activity sidebar  editor"
+    "activity panel    panel"
+    "status   status   status";
+}
+
+.workbench[data-sidebar="closed"] {
+  grid-template-columns: 48px 0 1fr;
+}
+
+/* While a sash is dragging, nothing else may take the pointer. */
+.sashing,
+.sashing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+.sashing .sash-horizontal,
+.sashing .sash-horizontal * {
+  cursor: row-resize !important;
+}
+
+/* ---------------------------------------------------------------- title bar */
+
+.titlebar {
+  grid-area: title;
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, 600px) 1fr;
+  align-items: center;
+  gap: 8px;
+  background: var(--titlebar-bg);
+  color: var(--titlebar-fg);
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px;
+  -webkit-app-region: drag;
+}
+
+.titlebar-menus {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.titlebar-logo {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  color: var(--accent);
+}
+
+.menu {
+  position: relative;
+}
+
+.menu > summary {
+  list-style: none;
+  cursor: default;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+.menu > summary:hover,
+.menu[open] > summary {
+  background: var(--con-hover);
+}
+
+.menu-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  min-width: 240px;
+  margin: 2px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--widget-border);
+  border-radius: 5px;
+  box-shadow: var(--shadow);
+}
+
+.menu-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+.menu-list button:hover:not(:disabled) {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.menu-list button:disabled {
+  color: var(--con-faint);
+}
+.menu-list kbd {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: var(--con-faint);
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.quick-input {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.quick-input:hover {
+  border-color: var(--accent);
+}
+.quick-input .codicon {
+  font-size: 13px;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.whoami {
+  display: flex;
+  gap: 2px;
+}
+
+.whoami-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 22px;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  padding: 0 8px 0 3px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.whoami-chip:hover {
+  background: var(--con-hover);
+}
+.whoami-chip[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--titlebar-fg);
+  cursor: pointer;
+}
+.icon-button:hover {
+  background: var(--con-hover);
+}
+.icon-button[data-active="false"] {
+  color: var(--con-faint);
+}
+
+/* ------------------------------------------------------------ activity bar */
+
+.activitybar {
+  grid-area: activity;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+}
+
+.activitybar button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--activitybar-fg);
+  cursor: pointer;
+}
+.activitybar button:hover {
+  color: var(--activitybar-fg-active);
+}
+.activitybar button[data-active="true"] {
+  color: var(--activitybar-fg-active);
+  border-left-color: var(--activitybar-fg-active);
+}
+.activitybar .codicon {
+  font-size: 24px;
+}
+.activitybar .activity-spacer {
+  flex: 1;
+}
+
+.activity-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- side bar */
+
+.sidebar {
+  grid-area: sidebar;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  min-width: 0;
+  /* Grid items default to min-height:auto, so a tall view would push the side
+     bar straight through the status bar. */
+  min-height: 0;
+  background: var(--chrome-2);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.workbench[data-sidebar="closed"] .sidebar {
+  display: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 35px;
+  padding: 0 20px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--con-dim);
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+/* -------------------------------------------------------------------- sash */
+
+.sash {
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+}
+.sash:hover,
+.sashing .sash {
+  background: var(--accent);
+}
+.sash-vertical {
+  top: 0;
+  right: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+}
+.sash-horizontal {
+  top: -2px;
+  left: 0;
+  height: 4px;
+  width: 100%;
+  cursor: row-resize;
+}
+
+/* ------------------------------------------------------------ editor area */
+
+.editor-area {
+  grid-area: editor;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--editor-bg);
+}
+
+.tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: 35px;
+  flex: 0 0 auto;
+  background: var(--tab-inactive-bg);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  min-width: 120px;
+  max-width: 240px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-top: 1px solid transparent;
+  background: var(--tab-inactive-bg);
+  color: var(--tab-inactive-fg);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab[data-active="true"] {
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+  border-top-color: var(--tab-active-border-top);
+}
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  opacity: 0;
+  font-size: 14px;
+}
+.tab:hover .tab-close,
+.tab[data-active="true"] .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--con-hover);
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--con-faint);
+  text-align: center;
+}
+.editor-empty kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  font-family: var(--ui-font);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------- panel */
+
+.panel {
+  grid-area: panel;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--panel-height);
+  min-height: 0;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+.workbench[data-panel="closed"] .panel {
+  height: 35px;
+}
+.workbench[data-panel="closed"] .panel-body {
+  display: none;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 35px;
+  flex: 0 0 auto;
+  padding: 0 8px 0 20px;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+.panel-tab {
+  position: relative;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 35px;
+  cursor: pointer;
+}
+.panel-tab:hover {
+  color: var(--ink);
+}
+.panel-tab[data-active="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -1px 0 var(--ink);
+}
+.panel-tab .activity-badge {
+  position: static;
+  margin-left: 6px;
+  display: inline-block;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 20px 12px;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0;
+  background: var(--statusbar-bg);
+  color: var(--statusbar-fg);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.status-side {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+button.status-item {
+  cursor: pointer;
+}
+button.status-item:hover {
+  background: var(--statusbar-hover);
+}
+.status-item .codicon {
+  font-size: 14px;
+}
+.status-item[data-tone="remote"] {
+  background: var(--statusbar-remote-bg);
+  color: #fff;
+}
+.status-item[data-tone="warn"] {
+  color: var(--con-contest);
+}
+.status-item[data-tone="error"] {
+  background: var(--con-deny);
+  color: #fff;
+}
+
+/* ----------------------------------------------------------------- palette */
+
+.palette {
+  width: min(680px, 90vw);
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--widget-border);
+  border-radius: 6px;
+  background: var(--widget-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  position: fixed;
+  top: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.palette::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.palette-input .codicon {
+  color: var(--con-dim);
+}
+.palette-input input {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.palette-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 4px 6px;
+  list-style: none;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.palette-row[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.palette-row[data-active="true"] .palette-cat,
+.palette-row[data-active="true"] .palette-key {
+  color: rgba(255, 255, 255, 0.75);
+}
+.palette-row[data-disabled="true"] {
+  opacity: 0.45;
+}
+.palette-cat {
+  color: var(--con-dim);
+  font-size: 12px;
+}
+.palette-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-key {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: var(--con-faint);
+}
+.palette-empty {
+  padding: 10px 8px;
+  color: var(--con-faint);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ shared */
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 20px 0 8px;
+  height: 22px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tree-row:hover {
+  background: var(--con-hover);
+}
+.tree-row[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.tree-row .codicon {
+  font-size: 16px;
+  flex: 0 0 auto;
+  color: var(--con-dim);
+}
+.tree-row[data-active="true"] .codicon {
+  color: inherit;
+}
+.tree-row[data-active="true"] .tree-meta {
+  color: rgba(255, 255, 255, 0.85);
+}
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+.tree-row[data-active="true"] .tree-meta {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ------------------------------------------------------------------- views */
+
+.view-note {
+  margin: 0 0 6px;
+  padding: 8px 20px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--con-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.view-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.view-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--con-dim);
+}
+
+.view-section .activity-badge {
+  position: static;
+}
+
+.tree-conflict {
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--con-deny);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Source control */
+
+.commit-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px 20px;
+  align-items: flex-start;
+}
+
+.commit-row:hover {
+  background: var(--con-hover);
+}
+
+.commit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.commit-summary {
+  font-size: 13px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.commit-tag {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--con-select);
+  color: var(--ink);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

@@ -52,6 +52,8 @@ export interface AgentContribution {
   /** Short, safe. Never the compiled prompt or the whole file. */
   readonly summary: string;
   readonly createdAt: string;
+  /** Where this commit's last edit ended. Absent when it changed nothing. */
+  readonly caret?: Caret;
 }
 
 export interface ProvenanceInput {
@@ -67,6 +69,26 @@ export interface ProvenanceInput {
 export interface ProvenanceUpdate {
   readonly lines: readonly LineProvenance[];
   readonly changedLineIds: readonly string[];
+  /** Where this commit's last edit ended. null when it changed nothing. */
+  readonly caret: Caret | null;
+}
+
+/**
+ * The character position at which a commit's last edit ended.
+ *
+ * This is deliberately NOT a cursor. Codex reports completed items, not
+ * keystrokes, so there is no keystroke position to report and inventing one
+ * would be an animation with no record behind it. What CONCORD genuinely knows
+ * is where the text it just committed stopped differing from the text it
+ * replaced - and it knows it for free, because the diff below is already run
+ * to attribute lines.
+ *
+ * `line` is 1-based in the NEW content. `column` is 1-based, and points at the
+ * first character position after the last one that changed.
+ */
+export interface Caret {
+  readonly line: number;
+  readonly column: number;
 }
 
 /** Provenance for content that exists before any Agent has written to it. */
@@ -126,13 +148,31 @@ export function reconcileProvenance(input: ProvenanceInput): ProvenanceUpdate {
     updatedAt: input.at,
   });
 
+  // The caret of the LAST hunk wins, which is where the Agent's edit finished.
+  // Same "last marker wins" rule parseCheckpoint already uses for the commit
+  // message, and for the same reason: one commit, one answer.
+  let caret: Caret | null = null;
+
   for (const hunk of hunks) {
     for (; cursor < hunk.start; cursor += 1) lines.push(carry(cursor));
+    const replaced = hunk.deleted > 0 ? oldLines[hunk.start] : undefined;
     cursor += hunk.deleted;
     for (let n = 0; n < hunk.inserted.length; n += 1) {
       const line = attribute();
       lines.push(line);
       changedLineIds.push(line.lineId);
+    }
+    if (hunk.inserted.length > 0) {
+      const lastInserted = hunk.inserted[hunk.inserted.length - 1] ?? "";
+      caret = {
+        // lines.length is this line's 1-based number in the new content,
+        // because one entry is pushed per line of it.
+        line: lines.length,
+        column: endColumnOf(replaced, lastInserted),
+      };
+    } else if (hunk.deleted > 0) {
+      // A pure deletion leaves the caret where the removed text used to start.
+      caret = { line: Math.max(1, lines.length), column: 1 };
     }
   }
   for (; cursor < oldLines.length; cursor += 1) lines.push(carry(cursor));
@@ -149,7 +189,31 @@ export function reconcileProvenance(input: ProvenanceInput): ProvenanceUpdate {
         " lines",
     );
   }
-  return { lines, changedLineIds };
+  return { lines, changedLineIds, caret };
+}
+
+/**
+ * Where on the line the change ended.
+ *
+ * For a replacement, that is one past the last character that differs from the
+ * line it replaced - so editing the tail of a long line puts the caret at the
+ * tail, not at the end of the whole line. For an insertion there is nothing to
+ * compare against, so the caret sits at the end of the inserted text.
+ */
+function endColumnOf(replaced: string | undefined, inserted: string): number {
+  if (replaced === undefined || replaced === inserted) return inserted.length + 1;
+
+  // Walk back over the characters the two lines still share. What is left is
+  // the last character that actually changed, and the caret sits after it.
+  let shared = 0;
+  const limit = Math.min(replaced.length, inserted.length);
+  while (
+    shared < limit &&
+    replaced[replaced.length - 1 - shared] === inserted[inserted.length - 1 - shared]
+  ) {
+    shared += 1;
+  }
+  return inserted.length - shared + 1;
 }
 
 export interface AgentRange {

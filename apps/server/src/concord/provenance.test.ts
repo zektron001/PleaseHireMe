@@ -172,3 +172,50 @@ describe("responsible-Agent resolution", () => {
     expect(result.ambiguous).toBe(false);
   });
 });
+
+/**
+ * The caret. What is asserted here is the whole claim the UI is allowed to
+ * make: a caret marks where a COMMIT ended, computed from the same diff that
+ * attributes lines. Nothing here samples, times, or interpolates anything.
+ */
+describe("commit caret", () => {
+  const caretFor = (previousContent: string, nextContent: string) =>
+    reconcileProvenance({
+      previous: seedProvenance("doc", previousContent, 1, AT).lines,
+      previousContent,
+      nextContent,
+      agentId: "agent-1",
+      contributionId: "contribution-2",
+      version: 2,
+      at: AT,
+    }).caret;
+
+  it("puts the caret at the end of an appended line", () => {
+    expect(caretFor("alpha\n", "alpha\nbeta\n")).toEqual({ line: 2, column: 5 });
+  });
+
+  it("puts it after the last character that actually changed, not at the line end", () => {
+    // Only "one" -> "two" differs; the trailing " tail" is shared, so the caret
+    // must stop before it rather than jumping to the end of the line.
+    expect(caretFor("value one tail\n", "value two tail\n")).toEqual({
+      line: 1,
+      column: 10,
+    });
+  });
+
+  it("reports the LAST hunk when a commit changes several places", () => {
+    const caret = caretFor("a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n");
+    expect(caret).toEqual({ line: 5, column: 2 });
+  });
+
+  it("has no caret when the content did not change", () => {
+    expect(caretFor("same\n", "same\n")).toBeNull();
+  });
+
+  it("survives a first write into an empty document", () => {
+    // "hello\n" is two lines - "hello" and the empty one the trailing newline
+    // creates - so the commit really does end at the start of line 2, which is
+    // also where a cursor lands after typing hello and Return.
+    expect(caretFor("", "hello\n")).toEqual({ line: 2, column: 1 });
+  });
+});

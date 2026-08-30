@@ -35,7 +35,8 @@ import type {
   Subtask,
 } from "./types";
 import { ReviewPanel } from "./Review";
-import { CodeView, type Selection } from "./Code";
+import { type Selection } from "./Code";
+import { CodeEditor } from "./editor/CodeEditor";
 import {
   AccessPanel,
   AgentLive,
@@ -45,9 +46,24 @@ import {
   UsagePanel,
 } from "./Collab";
 import { Sessions } from "./Sessions";
+import { ExplorerView } from "./views/ExplorerView";
+import { SourceControlView } from "./views/SourceControlView";
 import { clockOf, colorOf, humanName, initialsOf, shortId } from "./participants";
-import { applyTheme, readChoice, watchSystem, type ThemeChoice } from "./theme";
+import {
+  applyTheme,
+  readChoice,
+  resolve as resolveTheme,
+  watchSystem,
+  type ThemeChoice,
+} from "./theme";
+import { Codicon } from "./shell/Codicon";
+import { Sash } from "./shell/Sash";
+import { TitleBar, type Menu } from "./shell/TitleBar";
+import { StatusBar, type StatusItem } from "./shell/StatusBar";
+import { CommandPalette } from "./shell/CommandPalette";
+import { matchKey, type Command } from "./shell/commands";
 import "./console.css";
+import "./workbench.css";
 
 const POLL_MS = 2000;
 const DEFAULT_SHARED = "docs/CHANGELOG.md";
@@ -60,17 +76,71 @@ type Panel =
   | "comments"
   | "subagents"
   | "usage"
-  | "access";
+  | "access"
+  | "scm";
 
-const PANELS: { id: Panel; glyph: string; label: string }[] = [
-  { id: "sessions", glyph: "▦", label: "Sessions" },
-  { id: "files", glyph: "🗎", label: "Shared documents" },
-  { id: "people", glyph: "👤", label: "People" },
-  { id: "queue", glyph: "≡", label: "Queue" },
-  { id: "comments", glyph: "✎", label: "Comments" },
-  { id: "subagents", glyph: "◈", label: "Subagents" },
-  { id: "usage", glyph: "◷", label: "Usage" },
-  { id: "access", glyph: "🔑", label: "Share & access" },
+/**
+ * The activity bar. Codicon names, not emoji: these are the icons VS Code
+ * itself ships, so the rail reads as the real thing at a glance and the labels
+ * stay in the tooltip where VS Code puts them.
+ */
+type BottomTab = "live" | "decisions" | "chain" | "problems" | "output";
+
+const BOTTOM_TABS: { id: BottomTab; label: string }[] = [
+  { id: "live", label: "Agent Live" },
+  { id: "problems", label: "Problems" },
+  { id: "output", label: "Output" },
+  { id: "decisions", label: "Decisions" },
+  { id: "chain", label: "Decision chain" },
+];
+
+const LAYOUT_KEY = "launchpad.layout";
+
+/**
+ * Layout sizes live in CSS custom properties so a sash drag never re-renders
+ * the workbench (see Sash.tsx). They are read back out here only to persist
+ * them, which is why this is a plain function and not state.
+ */
+function rememberLayout(next: { sidebar?: number; panel?: number }): void {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}") as Record<
+      string,
+      number
+    >;
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ ...stored, ...next }));
+  } catch {
+    // Private windows and blocked site data both throw. The layout still works,
+    // it just will not survive a reload.
+  }
+}
+
+function restoreLayout(): void {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}") as Record<
+      string,
+      number
+    >;
+    if (stored["sidebar"]) {
+      document.documentElement.style.setProperty("--sidebar-width", stored["sidebar"] + "px");
+    }
+    if (stored["panel"]) {
+      document.documentElement.style.setProperty("--panel-height", stored["panel"] + "px");
+    }
+  } catch {
+    // Same as above: the defaults in workbench.css apply.
+  }
+}
+
+const PANELS: { id: Panel; icon: string; label: string; key?: string }[] = [
+  { id: "files", icon: "files", label: "Explorer", key: "ctrl+shift+e" },
+  { id: "sessions", icon: "play-circle", label: "Sessions", key: "ctrl+shift+d" },
+  { id: "scm", icon: "source-control", label: "Source Control", key: "ctrl+shift+g" },
+  { id: "comments", icon: "comment-discussion", label: "Comments" },
+  { id: "people", icon: "organization", label: "People" },
+  { id: "queue", icon: "list-ordered", label: "Queue" },
+  { id: "subagents", icon: "type-hierarchy-sub", label: "Subagents" },
+  { id: "usage", icon: "graph", label: "Usage" },
+  { id: "access", icon: "key", label: "Share & access" },
 ];
 
 /** Renders text with the contested line ranges marked, rather than as a blob. */
@@ -112,9 +182,14 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [blame, setBlame] = useState<BlameView | null>(null);
   const [showBlame, setShowBlame] = useState(true);
   const [theme, setTheme] = useState<ThemeChoice>(() => readChoice());
-  const [panel, setPanel] = useState<Panel>("sessions");
-  const [bottomTab, setBottomTab] = useState<"chain" | "problems" | "output">("chain");
+  const [panel, setPanel] = useState<Panel>("files");
+  const [bottomTab, setBottomTab] = useState<BottomTab>("live");
   const [bottomOpen, setBottomOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [palette, setPalette] = useState<{ open: boolean; mode: ">" | "" }>({
+    open: false,
+    mode: ">",
+  });
   const [selection, setSelection] = useState<Selection | null>(null);
   const [anchorLine, setAnchorLine] = useState<number | null>(null);
   const [question, setQuestion] = useState("");
@@ -142,11 +217,17 @@ export default function Console({ onExit }: { onExit: () => void }) {
       .catch(() => setHumans([]));
   }, []);
 
+  // Monaco cannot read CSS custom properties, so it needs the RESOLVED theme,
+  // not the choice. "system" has to re-resolve when the OS flips.
+  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() =>
+    resolveTheme(readChoice()),
+  );
+
   useEffect(() => {
-    applyTheme(theme);
+    setResolvedTheme(applyTheme(theme));
     // Only follow the OS while the choice actually is "follow the OS".
     if (theme !== "system") return;
-    return watchSystem(() => applyTheme("system"));
+    return watchSystem(() => setResolvedTheme(applyTheme("system")));
   }, [theme]);
 
   const signIn = useCallback(async (human: Human) => {
@@ -390,8 +471,253 @@ export default function Console({ onExit }: { onExit: () => void }) {
     return agent ? agent.role : me ? "No delegation" : "Signed out";
   }, [board, me]);
 
+  /**
+   * Every action in the workbench, in one list. Buttons call into this rather
+   * than the other way round, which is what makes the palette worth having:
+   * the keyboard reaches everything the mouse can, and a new action is one
+   * object rather than an edit in three places.
+   */
+  const commands = useMemo<Command[]>(() => {
+    const showPanel = (id: Panel, label: string, key?: string): Command => ({
+      id: "view.show." + id,
+      title: "Show " + label,
+      category: "View",
+      key,
+      run: () => {
+        setPanel(id);
+        setSidebarOpen(true);
+      },
+    });
+
+    const list: Command[] = [
+      {
+        id: "workbench.showCommands",
+        title: "Show All Commands",
+        category: "Workbench",
+        key: "ctrl+shift+p",
+        hidden: true,
+        run: () => setPalette({ open: true, mode: ">" }),
+      },
+      {
+        id: "workbench.quickOpen",
+        title: "Go to File...",
+        category: "Go",
+        key: "ctrl+p",
+        run: () => setPalette({ open: true, mode: "" }),
+      },
+      {
+        id: "workbench.toggleSidebar",
+        title: "Toggle Primary Side Bar",
+        category: "View",
+        key: "ctrl+b",
+        run: () => setSidebarOpen((open) => !open),
+      },
+      {
+        id: "workbench.togglePanel",
+        title: "Toggle Panel",
+        category: "View",
+        key: "ctrl+j",
+        run: () => setBottomOpen((open) => !open),
+      },
+      ...PANELS.map((entry) => showPanel(entry.id, entry.label, entry.key)),
+      {
+        id: "view.problems",
+        title: "Problems",
+        category: "View",
+        key: "ctrl+shift+m",
+        run: () => {
+          setBottomTab("problems");
+          setBottomOpen(true);
+        },
+      },
+      {
+        id: "view.agentLive",
+        title: "Agent Live",
+        category: "View",
+        run: () => {
+          setBottomTab("live");
+          setBottomOpen(true);
+        },
+      },
+      {
+        id: "workbench.closeEditor",
+        title: "Close Editor",
+        category: "View",
+        key: "ctrl+w",
+        enabled: selected !== null,
+        run: () => {
+          if (!selected) return;
+          setOpenTabs((tabs) => tabs.filter((id) => id !== selected));
+          setSelected(openTabs.find((id) => id !== selected) ?? null);
+        },
+      },
+      {
+        id: "workbench.selectTheme",
+        title: "Cycle Colour Theme",
+        category: "Preferences",
+        run: () =>
+          setTheme((current) =>
+            current === "light" ? "dark" : current === "dark" ? "system" : "light",
+          ),
+      },
+      {
+        id: "concord.toggleBlame",
+        title: showBlame ? "Hide Line Attribution" : "Show Line Attribution",
+        category: "CONCORD",
+        enabled: doc !== null,
+        run: () => setShowBlame((on) => !on),
+      },
+      {
+        id: "warrant.plan",
+        title: "Plan a Task and Fan Out",
+        category: "WARRANT",
+        enabled: me !== null,
+        run: () => {
+          setPanel("sessions");
+          setSidebarOpen(true);
+          setView("dashboard");
+        },
+      },
+      {
+        id: "workbench.sessions",
+        title: "Go to Sessions Dashboard",
+        category: "Go",
+        run: () => setView("dashboard"),
+      },
+      {
+        id: "workbench.playground",
+        title: "Open the Agent Playground",
+        category: "Go",
+        run: onExit,
+      },
+    ];
+
+    for (const subtask of task?.subtasks ?? []) {
+      list.push({
+        id: "warrant.run." + subtask.id,
+        title: "Run Agent for " + subtask.title,
+        category: "WARRANT",
+        enabled: subtask.ownerId === me?.id && busy === null,
+        run: () => void runSubtask(subtask),
+      });
+    }
+
+    return list;
+    // `runSubtask` is re-created every render, so listing it here would rebuild
+    // the array every render and re-subscribe the key listener with it. What it
+    // actually closes over is `shared`, which is listed instead.
+  }, [selected, openTabs, showBlame, doc, me, task, busy, shared, onExit]);
+
+  // One listener for the whole workbench. preventDefault only on a real match,
+  // so Ctrl+C and friends still belong to the browser.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPalette((current) => (current.open ? { ...current, open: false } : current));
+        return;
+      }
+      for (const command of commands) {
+        if (!command.key || !matchKey(event, command.key)) continue;
+        if (command.enabled === false) return;
+        event.preventDefault();
+        void command.run();
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [commands]);
+
+  useEffect(restoreLayout, []);
+
+  const statusLeft = useMemo<StatusItem[]>(() => {
+    const items: StatusItem[] = [
+      {
+        id: "who",
+        icon: me ? "account" : "circle-slash",
+        text: me ? me.displayName : "not signed in",
+        title: me?.id,
+        tone: "remote",
+      },
+      {
+        id: "capability",
+        icon: "shield",
+        text: capability,
+        title: "Read from your live warrant's scopes, not from a setting",
+      },
+    ];
+    if (selected) {
+      items.push({
+        id: "doc",
+        icon: "file",
+        text: selected.split("/").at(-1) ?? selected,
+        title: selected,
+      });
+    }
+    if (doc) items.push({ id: "rev", icon: "git-commit", text: "rev " + doc.version });
+    return items;
+  }, [me, capability, selected, doc]);
+
+  const statusRight = useMemo<StatusItem[]>(
+    () => [
+      {
+        id: "problems",
+        icon: "error",
+        text: openConflicts.length + " conflict" + (openConflicts.length === 1 ? "" : "s"),
+        tone: openConflicts.length > 0 ? "warn" : undefined,
+        onClick: () => {
+          setBottomTab("problems");
+          setBottomOpen(true);
+        },
+      },
+      {
+        id: "comments",
+        icon: "comment",
+        text: openReviewCount,
+        title: "Open review comments",
+        onClick: () => {
+          setPanel("comments");
+          setSidebarOpen(true);
+        },
+      },
+      {
+        id: "stream",
+        icon: streaming ? "radio-tower" : "sync",
+        text: streaming ? "live" : "polling",
+        title: streaming
+          ? "Pushed over SSE"
+          : "The board poll carries the same events, two seconds behind",
+      },
+      {
+        id: "chain",
+        icon: chain?.chainValid === false ? "unlock" : "lock",
+        text: chain ? "chain " + (chain.chainValid ? "VALID" : "BROKEN") : "chain —",
+        tone: chain && !chain.chainValid ? "error" : undefined,
+        onClick: () => {
+          setBottomTab("chain");
+          setBottomOpen(true);
+        },
+      },
+    ],
+    [openConflicts.length, openReviewCount, streaming, chain],
+  );
+
+  const menus = useMemo<Menu[]>(() => {
+    const find = (id: string) => commands.find((entry) => entry.id === id);
+    const pick = (...ids: string[]) =>
+      ids.map(find).filter((entry): entry is Command => entry !== undefined);
+    return [
+      { label: "File", items: pick("workbench.quickOpen", "workbench.closeEditor") },
+      { label: "View", items: pick("workbench.showCommands", "workbench.toggleSidebar", "workbench.togglePanel", "view.problems", "view.agentLive") },
+      { label: "Go", items: pick("workbench.quickOpen", "workbench.sessions", "workbench.playground") },
+      { label: "Agent", items: pick("warrant.plan", "concord.toggleBlame") },
+      { label: "Preferences", items: pick("workbench.selectTheme") },
+    ];
+  }, [commands]);
+
   const badge = (id: Panel): number | null => {
     if (id === "sessions") return board?.sessions.length ?? null;
+    if (id === "scm") return openConflicts.length || null;
     if (id === "files") return docs.length || null;
     if (id === "people") return board?.people.filter((p) => p.agents.length > 0).length ?? null;
     if (id === "queue") return board?.queue.length || null;
@@ -402,67 +728,83 @@ export default function Console({ onExit }: { onExit: () => void }) {
   };
 
   return (
-    <div className="console ide">
-      <div className="console-head">
-        <div className="console-title">
-          <h1>Concord</h1>
-          <span>shared state · guarded by WARRANT</span>
-        </div>
+    <div
+      className="workbench"
+      data-sidebar={sidebarOpen ? "open" : "closed"}
+      data-panel={bottomOpen ? "open" : "closed"}
+    >
+      <TitleBar
+        menus={menus}
+        humans={humans}
+        me={me}
+        onSignIn={(human) => void signIn(human)}
+        onQuickOpen={() => setPalette({ open: true, mode: "" })}
+        theme={theme}
+        onCycleTheme={() =>
+          setTheme((current) =>
+            current === "light" ? "dark" : current === "dark" ? "system" : "light",
+          )
+        }
+        sidebarOpen={sidebarOpen}
+        panelOpen={bottomOpen}
+        onToggleSidebar={() => setSidebarOpen((open) => !open)}
+        onTogglePanel={() => setBottomOpen((open) => !open)}
+      />
 
-        <div className="whoami">
-          <span className="eyebrow" style={{ marginRight: 6 }}>
-            signed in as
-          </span>
-          {humans.map((human) => (
-            <button
-              key={human.id}
-              data-active={me?.id === human.id}
-              onClick={() => void signIn(human)}
-              title={human.id}
-            >
-              <span className="avatar sm" style={{ background: colorOf(human.id) }}>
-                {initialsOf(human.id, null)}
-              </span>
-              {human.displayName}
-            </button>
-          ))}
-        </div>
-
-        <div className="console-chain">
-          {chain ? (
-            <>
-              <span>
-                chain{" "}
-                <span className={chain.chainValid ? "chain-valid" : "chain-broken"}>
-                  {chain.chainValid ? "VALID" : "BROKEN"}
-                </span>
-              </span>
-              <span>head {chain.chainHead.slice(0, 12)}</span>
-              <span>{chain.retained} events</span>
-            </>
-          ) : (
-            <span>sign in to read the chain</span>
-          )}
-          <button
-            className="theme-toggle"
-            title={"Theme: " + theme + " — click to cycle light / dark / system"}
-            onClick={() =>
-              setTheme((current) =>
-                current === "light" ? "dark" : current === "dark" ? "system" : "light",
-              )
-            }
-          >
-            {theme === "light" ? "☀ light" : theme === "dark" ? "☾ dark" : "◐ system"}
-          </button>
-          <button className="button button-ghost" onClick={onExit}>
-            Playground
-          </button>
-        </div>
-      </div>
+      <CommandPalette
+        open={palette.open}
+        initialMode={palette.mode}
+        commands={commands}
+        docs={docs.map((entry) => ({ id: entry.id, version: entry.version }))}
+        onOpenDoc={(docId) => {
+          setSelected(docId);
+          setView("workspace");
+        }}
+        onClose={() => setPalette((current) => ({ ...current, open: false }))}
+      />
 
       {error && <div className="console-error">{error}</div>}
 
-      <div className="task-strip">
+      <nav className="activitybar">
+        {PANELS.map((entry) => {
+          const count = badge(entry.id);
+          return (
+            <button
+              key={entry.id}
+              data-active={panel === entry.id}
+              title={entry.label + (entry.key ? " (" + entry.key + ")" : "")}
+              onClick={() => {
+                setPanel(entry.id);
+                setSidebarOpen(true);
+                if (entry.id === "sessions") setView("dashboard");
+              }}
+            >
+              <Codicon name={entry.icon} />
+              {count !== null && count > 0 && (
+                <span className="activity-badge">{count}</span>
+              )}
+            </button>
+          );
+        })}
+        <span className="activity-spacer" />
+      </nav>
+
+      <aside className="sidebar">
+        <div className="sidebar-head">
+          <span>{PANELS.find((entry) => entry.id === panel)?.label}</span>
+          <span>{badge(panel) ?? ""}</span>
+        </div>
+
+        <div className="sidebar-body">
+          {!me && (
+            <p className="panel-empty">
+              Sign in from the title bar. Every view here is scoped to the
+              delegations you actually hold.
+            </p>
+          )}
+
+          {me && panel === "sessions" && (
+            <div className="task-strip">
         <form className="plan-form" onSubmit={plan}>
           <span className="eyebrow">Task</span>
           <input
@@ -503,46 +845,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
             </div>
           );
         })}
-      </div>
-
-      <div className="ide-main">
-        <nav className="activitybar">
-          {PANELS.map((entry) => {
-            const count = badge(entry.id);
-            return (
-              <button
-                key={entry.id}
-                className="activity-item"
-                data-active={panel === entry.id}
-                title={entry.label}
-                onClick={() => {
-                  setPanel(entry.id);
-                  if (entry.id === "sessions") setView("dashboard");
-                }}
-              >
-                {entry.glyph}
-                {count !== null && count > 0 && (
-                  <span className="activity-badge">{count}</span>
-                )}
-              </button>
-            );
-          })}
-          <span className="activity-spacer" />
-        </nav>
-
-        <div className="console-body">
-          <div className="rail">
-            <div className="rail-label">
-              <span>{PANELS.find((entry) => entry.id === panel)?.label}</span>
-              <span>{badge(panel) ?? ""}</span>
             </div>
-
-            {!me && (
-              <p className="panel-empty">
-                Sign in as a human above. Every panel here is scoped to the
-                delegations you actually hold.
-              </p>
-            )}
+          )}
 
             {me && panel === "sessions" && (
               <>
@@ -574,47 +878,27 @@ export default function Console({ onExit }: { onExit: () => void }) {
             )}
 
             {me && panel === "files" && (
-              <>
-                {docs.length === 0 && (
-                  <p className="panel-empty">
-                    None yet. Split a task with a shared path, then run an Agent.
-                  </p>
-                )}
-                {docs.map((entry) => (
-                  <button
-                    key={entry.id}
-                    className="doc-row"
-                    data-active={entry.id === selected}
-                    onClick={() => {
-                      setSelected(entry.id);
-                      setView("workspace");
-                    }}
-                  >
-                    <span className="doc-row-name">{entry.id}</span>
-                    <span className="doc-row-meta">
-                      <span>rev {entry.version}</span>
-                      <span>{entry.writers} writers</span>
-                      {entry.conflicts > 0 && (
-                        <span className="conflicted">{entry.conflicts} conflict</span>
-                      )}
-                      <span className="presence">
-                        {entry.present.map((person) => (
-                          <i
-                            key={person.agentId}
-                            data-editing={person.activity === "editing"}
-                            style={{ background: colorOf(person.humanId ?? person.agentId) }}
-                            title={
-                              (person.humanId ?? person.agentId) + " is " + person.activity
-                            }
-                          >
-                            {initialsOf(person.humanId, person.agentId)}
-                          </i>
-                        ))}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </>
+              <ExplorerView
+                docs={docs}
+                selected={selected}
+                onOpen={(docId) => {
+                  setSelected(docId);
+                  setView("workspace");
+                }}
+              />
+            )}
+
+            {me && panel === "scm" && (
+              <SourceControlView
+                docId={selected}
+                agentId={myAgent}
+                version={doc?.version ?? 0}
+                conflicts={openConflicts}
+                onOpenProblems={() => {
+                  setBottomTab("problems");
+                  setBottomOpen(true);
+                }}
+              />
             )}
 
             {me && panel === "people" && (
@@ -676,8 +960,18 @@ export default function Console({ onExit }: { onExit: () => void }) {
                 ))}
               </>
             )}
-          </div>
+        </div>
 
+        <Sash
+          orientation="vertical"
+          variable="--sidebar-width"
+          min={170}
+          max={600}
+          onCommit={(value) => rememberLayout({ sidebar: value })}
+        />
+      </aside>
+
+      <main className="editor-area">
           <div className="doc">
             {view === "dashboard" ? (
               <Sessions
@@ -773,21 +1067,20 @@ export default function Console({ onExit }: { onExit: () => void }) {
                       </button>
                     </div>
 
-                    {doc.content ? (
-                      <CodeView
-                        docId={selected}
-                        content={doc.content}
-                        blame={blame?.lines ?? null}
-                        present={doc.present?.present ?? []}
-                        selection={selection}
-                        showBlame={showBlame}
-                        onSelect={selectLine}
-                      />
-                    ) : (
-                      <p className="doc-empty">
-                        Empty. No Agent has committed to it yet.
-                      </p>
-                    )}
+                    <CodeEditor
+                      docId={selected}
+                      value={doc.content ?? ""}
+                      version={doc.version}
+                      theme={resolvedTheme}
+                      readOnly={false}
+                      blame={blame?.lines ?? null}
+                      showBlame={showBlame}
+                      present={doc.present?.present ?? []}
+                      viewerAgentId={myAgent}
+                      comments={review?.comments ?? []}
+                      conflicts={doc.conflicts ?? []}
+                      onSelect={setSelection}
+                    />
 
                     {selection && (
                       <div className="selection-bar">
@@ -961,85 +1254,97 @@ export default function Console({ onExit }: { onExit: () => void }) {
             )}
           </div>
 
-          <div className="stream">
-            <AgentLive events={live} connected={streaming && me !== null} />
-
-            <div className="stream-label">
-              <span>Decision stream</span>
-              <span>{chain?.scope === "all" ? "all" : "yours"}</span>
-            </div>
-            {!chain && (
-              <p className="panel-empty">
-                The chain is viewer-scoped: sign in to see the decisions your
-                Agents produced. The orchestrator sees every one.
-              </p>
-            )}
-            {chain && visibleEvents.length === 0 && (
-              <p className="panel-empty">No decisions on this document yet.</p>
-            )}
-            {visibleEvents.map((event) => (
-              <div className="event" key={event.eventId}>
-                <div className="event-top">
-                  <span className="verdict" data-decision={event.verdict.decision}>
-                    {event.verdict.decision === "Allow" ? "ALLOW" : "DENY"}
-                  </span>
-                  <time>{clockOf(event.at)}</time>
-                  <span className="gate-tag">{event.gate}</span>
-                  <span className="event-rule">{event.verdict.ruleId}</span>
-                </div>
-                <dl className="event-tuple">
-                  <dt>human</dt>
-                  <dd>{String(event.evidence?.["human"] ?? "-")}</dd>
-                  <dt>agent</dt>
-                  <dd>{shortId(String(event.evidence?.["agent"] ?? "-"))}</dd>
-                  <dt>action</dt>
-                  <dd>{String(event.evidence?.["action"] ?? "-")}</dd>
-                  <dt>resource</dt>
-                  <dd>{String(event.evidence?.["resource"] ?? "-")}</dd>
-                </dl>
-                {event.verdict.decision === "Deny" && (
-                  <p className="event-reason">{event.verdict.reason}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      </main>
 
       <div className="panel">
-        <div className="panel-tabs">
-          {(["chain", "problems", "output"] as const).map((tab) => (
-            <button
-              key={tab}
-              className="panel-tab"
-              data-active={bottomTab === tab}
-              onClick={() => {
-                setBottomTab(tab);
-                setBottomOpen(true);
-              }}
-            >
-              {tab === "chain"
-                ? "Decision chain"
-                : tab === "problems"
-                  ? "Problems"
-                  : "Agent output"}
-              {tab === "chain" && (
-                <span className="chain-seq">{chain?.events.length ?? 0}</span>
-              )}
-              {tab === "problems" && denials.length + openConflicts.length > 0 && (
-                <span className="chain-seq bad">
-                  {denials.length + openConflicts.length}
-                </span>
-              )}
-            </button>
-          ))}
-          <span className="panel-spacer" />
-          <button className="panel-tab" onClick={() => setBottomOpen((open) => !open)}>
-            {bottomOpen ? "collapse" : "expand"}
+        <Sash
+          orientation="horizontal"
+          variable="--panel-height"
+          min={35}
+          max={700}
+          invert
+          onCommit={(value) => rememberLayout({ panel: value })}
+        />
+        <div className="panel-head">
+          <div className="panel-tabs">
+            {BOTTOM_TABS.map((tab) => {
+              const count =
+                tab.id === "chain"
+                  ? (chain?.events.length ?? 0)
+                  : tab.id === "problems"
+                    ? denials.length + openConflicts.length
+                    : tab.id === "live"
+                      ? live.length
+                      : 0;
+              return (
+                <button
+                  key={tab.id}
+                  className="panel-tab"
+                  data-active={bottomTab === tab.id}
+                  onClick={() => {
+                    setBottomTab(tab.id);
+                    setBottomOpen(true);
+                  }}
+                >
+                  {tab.label}
+                  {count > 0 && <span className="activity-badge">{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => setBottomOpen((open) => !open)}
+            title={bottomOpen ? "Collapse Panel (Ctrl+J)" : "Expand Panel (Ctrl+J)"}
+          >
+            <Codicon name={bottomOpen ? "chevron-down" : "chevron-up"} />
           </button>
         </div>
 
         <div className="panel-body" data-open={bottomOpen}>
+          {bottomTab === "live" && (
+            <AgentLive events={live} connected={streaming && me !== null} />
+          )}
+
+          {bottomTab === "decisions" && (
+            <>
+              {!chain && (
+                <p className="panel-empty">
+                  The chain is viewer-scoped: sign in to see the decisions your
+                  Agents produced. The orchestrator sees every one.
+                </p>
+              )}
+              {chain && visibleEvents.length === 0 && (
+                <p className="panel-empty">No decisions on this document yet.</p>
+              )}
+              {visibleEvents.map((event) => (
+                <div className="event" key={event.eventId}>
+                  <div className="event-top">
+                    <span className="verdict" data-decision={event.verdict.decision}>
+                      {event.verdict.decision === "Allow" ? "ALLOW" : "DENY"}
+                    </span>
+                    <time>{clockOf(event.at)}</time>
+                    <span className="gate-tag">{event.gate}</span>
+                    <span className="event-rule">{event.verdict.ruleId}</span>
+                  </div>
+                  <dl className="event-tuple">
+                    <dt>human</dt>
+                    <dd>{String(event.evidence?.["human"] ?? "-")}</dd>
+                    <dt>agent</dt>
+                    <dd>{shortId(String(event.evidence?.["agent"] ?? "-"))}</dd>
+                    <dt>action</dt>
+                    <dd>{String(event.evidence?.["action"] ?? "-")}</dd>
+                    <dt>resource</dt>
+                    <dd>{String(event.evidence?.["resource"] ?? "-")}</dd>
+                  </dl>
+                  {event.verdict.decision === "Deny" && (
+                    <p className="event-reason">{event.verdict.reason}</p>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
           {bottomTab === "chain" && (
             <>
               {(chain?.events.length ?? 0) === 0 && (
@@ -1129,32 +1434,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
         </div>
       </div>
 
-      <footer className="statusbar">
-        <span>{me ? <b>{me.displayName}</b> : "not signed in"}</span>
-        <span className="capability" title="Read from your live warrant's scopes">
-          {capability}
-        </span>
-        <span>{selected ? <b>{selected}</b> : "no document"}</span>
-        {doc && <span>rev {doc.version}</span>}
-        <span className={openConflicts.length > 0 ? "bad" : ""}>
-          {openConflicts.length} conflict{openConflicts.length === 1 ? "" : "s"}
-        </span>
-        <span className={openReviewCount > 0 ? "bad" : ""}>
-          {openReviewCount} open comment{openReviewCount === 1 ? "" : "s"}
-        </span>
-        <span className="statusbar-spacer" />
-        <span className={streaming ? "ok" : ""}>
-          {streaming ? "live" : "polling"}
-        </span>
-        {chain && (
-          <span className={chain.chainValid ? "ok" : "bad"}>
-            chain {chain.chainValid ? "VALID" : "BROKEN"}
-          </span>
-        )}
-        <span>
-          {docs.length} document{docs.length === 1 ? "" : "s"}
-        </span>
-      </footer>
+      <StatusBar left={statusLeft} right={statusRight} />
     </div>
   );
 }

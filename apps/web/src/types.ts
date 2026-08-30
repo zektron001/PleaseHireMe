@@ -88,11 +88,27 @@ export interface PlannedTask {
   splitter?: string;
 }
 
+/**
+ * Where an Agent's last committed edit ended.
+ *
+ * Computed by CONCORD from the diff it already runs to attribute lines, so it
+ * is a fact about a commit rather than about a keystroke. `atVersion` is the
+ * revision it refers to, which is what makes a stale caret legible instead of
+ * misleading.
+ */
+export interface Caret {
+  line: number;
+  column: number;
+  atVersion: number;
+}
+
 export interface PresenceEntry {
   agentId: string;
   humanId: string | null;
   activity: "viewing" | "editing";
   at: number;
+  /** Absent until that Agent has committed at least once. */
+  caret?: Caret;
 }
 
 export interface ConcordDoc {
@@ -268,6 +284,26 @@ export interface BlameLine {
   contributionId: string | null;
   atVersion: number | null;
   message: string | null;
+}
+
+/**
+ * One accepted write. This is the commit object of this platform: there is no
+ * git, so the Source Control view is built from these plus `DocView.history`.
+ * `summary` is the Agent's own `CONCORD-COMMIT:` line - see concord/checkpoint.ts.
+ */
+export interface AgentContribution {
+  id: string;
+  documentId: string;
+  agentId: string;
+  humanId: string | null;
+  runId: string | null;
+  baseVersion: number;
+  resultingVersion: number;
+  outcome: "written" | "merged";
+  changedLineIds: string[];
+  summary: string;
+  createdAt: string;
+  caret?: { line: number; column: number };
 }
 
 export interface BlameView {

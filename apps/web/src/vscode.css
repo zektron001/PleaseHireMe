@@ -1,0 +1,186 @@
+/*
+ * VS Code Dark+ / Light+ over the existing tokens.
+ *
+ * styles.css established one rule that makes this file cheap: nothing in
+ * console.css hardcodes a hex. So re-skinning 2051 lines of console chrome is a
+ * matter of reassigning ~40 declarations, not editing any of it. This file is
+ * imported AFTER styles.css and does exactly that, plus it adds the tokens the
+ * workbench shell needs and that the paper palette had no equivalent for.
+ *
+ * Light+ keeps the activity bar dark, the way VS Code does. Inverting it is the
+ * single most common tell of a theme that only looks like VS Code in dark mode.
+ */
+
+@import "@vscode/codicons/dist/codicon.css";
+
+:root {
+  /* Light+ */
+  --ink: #3b3b3b;
+  --muted: #616161;
+  --line: #e5e5e5;
+  --paper: #ffffff;
+  --app-bg: #f8f8f8;
+  --purple: #005fb8;
+  --purple-dark: #0050a0;
+  --purple-soft: #e4edf8;
+  --green: #1a7f37;
+  --red: #cd3131;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  --rule: #e5e5e5;
+  --rule-strong: #cecece;
+  --con-dim: #616161;
+  --con-faint: #8b8b8b;
+  --con-soft: #3b3b3b;
+  --con-raise: #f8f8f8;
+  --con-raise-2: #ececec;
+  --con-hover: #e8e8e8;
+  --con-select: #e4edf8;
+  --con-allow: #1a7f37;
+  --con-deny: #cd3131;
+  --con-contest: #bf8803;
+  --con-deny-bg: #fdf3f3;
+  --con-deny-bg-2: #fbe9e9;
+  --con-deny-line: #f2c2c2;
+  --con-contest-line: #f0dcae;
+
+  --chrome: #2c2c2c;          /* activity bar - dark even in Light+ */
+  --chrome-2: #f8f8f8;        /* side bar */
+  --accent: #005fb8;
+
+  /* Shell-only tokens. No paper-palette equivalent existed. */
+  --titlebar-bg: #f8f8f8;
+  --titlebar-fg: #3b3b3b;
+  --activitybar-fg: #d7d7d7;
+  --activitybar-fg-active: #ffffff;
+  --editor-bg: #ffffff;
+  --tab-active-bg: #ffffff;
+  --tab-inactive-bg: #ececec;
+  --tab-active-fg: #3b3b3b;
+  --tab-inactive-fg: #7a7a7a;
+  --tab-border: #e5e5e5;
+  --tab-active-border-top: #005fb8;
+  --statusbar-bg: #005fb8;
+  --statusbar-fg: #ffffff;
+  --statusbar-hover: rgba(255, 255, 255, 0.12);
+  --statusbar-remote-bg: #0d7a3e;
+  --badge-bg: #005fb8;
+  --badge-fg: #ffffff;
+  /* VS Code's list.activeSelectionBackground. It needs its own token: --con-select
+     is a pale wash used behind ordinary text elsewhere, so it cannot also be the
+     high-contrast selection that carries white text. */
+  --list-active-bg: #0060c0;
+  --list-active-fg: #ffffff;
+  --input-bg: #ffffff;
+  --input-border: #cecece;
+  --dropdown-bg: #ffffff;
+  --widget-bg: #f8f8f8;
+  --widget-border: #c8c8c8;
+  --scrollbar: rgba(100, 100, 100, 0.4);
+  --caret-label-fg: #ffffff;
+
+  --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --ui-size: 13px;
+  --mono: "Droid Sans Mono", "Cascadia Code", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
+}
+
+:root[data-theme="dark"] {
+  /* Dark+ */
+  --ink: #cccccc;
+  --muted: #9d9d9d;
+  --line: #2b2b2b;
+  --paper: #1f1f1f;
+  --app-bg: #181818;
+  --purple: #0078d4;
+  --purple-dark: #026ec1;
+  --purple-soft: #04395e;
+  --green: #89d185;
+  --red: #f14c4c;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.56);
+
+  --rule: #2b2b2b;
+  --rule-strong: #3c3c3c;
+  --con-dim: #9d9d9d;
+  --con-faint: #6e7681;
+  --con-soft: #cccccc;
+  --con-raise: #202020;
+  --con-raise-2: #252526;
+  --con-hover: #2a2d2e;
+  --con-select: #04395e;
+  --con-allow: #89d185;
+  --con-deny: #f14c4c;
+  --con-contest: #cca700;
+  --con-deny-bg: #2a1d1d;
+  --con-deny-bg-2: #351f1f;
+  --con-deny-line: #5a2d2d;
+  --con-contest-line: #5a4a1d;
+
+  --chrome: #181818;
+  --chrome-2: #181818;
+  --accent: #0078d4;
+
+  --titlebar-bg: #181818;
+  --titlebar-fg: #cccccc;
+  --activitybar-fg: #868686;
+  --activitybar-fg-active: #d7d7d7;
+  --editor-bg: #1f1f1f;
+  --tab-active-bg: #1f1f1f;
+  --tab-inactive-bg: #181818;
+  --tab-active-fg: #ffffff;
+  --tab-inactive-fg: #9d9d9d;
+  --tab-border: #2b2b2b;
+  --tab-active-border-top: #0078d4;
+  --statusbar-bg: #181818;
+  --statusbar-fg: #cccccc;
+  --statusbar-hover: rgba(255, 255, 255, 0.12);
+  --statusbar-remote-bg: #16825d;
+  --badge-bg: #0078d4;
+  --badge-fg: #ffffff;
+  --list-active-bg: #04395e;
+  --list-active-fg: #ffffff;
+  --input-bg: #313131;
+  --input-border: #3c3c3c;
+  --dropdown-bg: #1f1f1f;
+  --widget-bg: #202020;
+  --widget-border: #454545;
+  --scrollbar: rgba(121, 121, 121, 0.4);
+  --caret-label-fg: #ffffff;
+}
+
+:root {
+  font-family: var(--ui-font);
+  font-size: var(--ui-size);
+}
+
+/* VS Code's scrollbars: no track, thumb only, no rounding. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+*::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--scrollbar) 100%, var(--ink) 20%);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.codicon {
+  font-size: 16px;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+}

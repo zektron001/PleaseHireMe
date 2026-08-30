@@ -26,7 +26,7 @@ is true of **this** platform, what backs it, and where we stopped.
 | 6 | Agents do not overwrite one another | ✅ | Three-way merge; same-line overlap becomes a held conflict a human settles |
 | 7 | All the team's sessions in one place | ✅ | Sessions dashboard, from the Orchestrator's tasks |
 | 8 | See what every Agent is typing, live | ⚠️→✅ | **Agent Live** streams the runtime's own event feed over SSE — its real commands, file changes, reasoning and messages. Not keystrokes: the runtime reports completed items, so "typing" is as granular as it gets. |
-| 9 | See where each Agent's cursor is | ❌ | **Refused.** See §5. |
+| 9 | See where each Agent's cursor is | ⚠️ | **Adapted.** A caret marks where an Agent's last commit ENDED, to the character, computed by `reconcileProvenance` from the diff CONCORD already runs. Not a keystroke position, and it does not move during a turn. See §5. |
 | 10 | See what teammates are prompting | ✅ | The human's own prompt is published to the feed, truncated; the compiled prompt never is |
 
 ---
@@ -36,7 +36,7 @@ is true of **this** platform, what backs it, and where we stopped.
 | Reel feature | Evidence in the reel | Existing support | Backend work | Frontend work | Value | Cost | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Dark IDE shell, revision badge, file tabs | A | theme + tabstrip | — | tab dots, close, rev badge | med | S | **Implemented** |
-| Syntax-highlighted editor | A | plain lines | — | 90-line tokenizer | med | S | **Adapted** — viewer, not editor; no Monaco |
+| Syntax-highlighted editor | A | plain lines | — | Monaco | med | M | **Implemented** - Monaco, see §5 |
 | Multiple panes / "New pane" | A | one pane | — | tab set | low | M | **Adapted** — multiple open tabs, one visible pane |
 | Collaboration sidebar with badges | B | 3 panels | `/api/live/board` | 8 panels | high | M | **Implemented** |
 | Activity / evidence feed with filters | C | decision chain | — | filters, Problems tab | high | S | **Implemented** |
@@ -49,7 +49,7 @@ is true of **this** platform, what backs it, and where we stopped.
 | Inline comments | J | review loop | — | already built | high | — | Already shipped |
 | Session capability mode | K | WARRANT | board people | status bar | med | S | **Implemented** |
 | Usage / provider attribution | L | `RunUsage` | usage totals | usage panel | med | S | **Implemented** |
-| Live character cursors | F | — | — | — | — | — | **Refused** |
+| Live character cursors | F | provenance diff | caret on `ProvenanceUpdate` | caret decoration | high | S | **Adapted** - commit carets, see §5 |
 | Agent typing animation | G | — | — | — | — | — | **Refused** |
 | macOS build, beta signup, org invites | M | — | — | — | — | — | Out of scope |
 
@@ -155,11 +155,39 @@ behind rather than wrong — the UI merges the two and de-duplicates by id.
 
 ## 5. What we refused, and why
 
-**Live character cursors.** The runtime reports *items* — a completed command, a
-file change, a message — not keystrokes. A cursor gliding through a file would
-be an animation with no backing record. What CONCORD genuinely knows is which
-Agent is on a document and whether it is viewing or editing, on a 15-second TTL,
-and that is what the gutter and the tab dots show.
+**Live character cursors — revised 2026-08-31. The refusal below was right
+about keystrokes and wrong about the conclusion.**
+
+The original argument: the runtime reports *items* — a completed command, a file
+change, a message — not keystrokes, so a cursor gliding through a file would be
+an animation with no backing record.
+
+Every word of that still holds, and none of it applies to what is now built.
+There **is** a character-precise position CONCORD genuinely knows, and it knows
+it for free: `reconcileProvenance` already diffs the previous content against
+the next one inside the commit critical section in order to attribute lines. At
+the moment it pushes the last inserted line of the last hunk, that line's number
+is `lines.length`, and the column is one string comparison away — one past the
+last character that actually differs from the line being replaced.
+
+So a caret here means exactly one thing: **the character position at which that
+Agent's last committed edit ended, at the revision its label names.** It is
+arithmetic over two strings the store already holds. It rides on
+`PresenceEntry.caret` under the same 15-second TTL as the rest of presence, and
+durably on `AgentContribution.caret`.
+
+What is still refused, for the original reason:
+
+- The caret does **not** move during a turn. Between two commits there is no
+  position to report, so none is invented. Mid-turn the honest signal is *which
+  file*, which is the dot on the tab.
+- **No interpolation.** Easing a caret between two committed positions would be
+  an animation rather than a measurement. The caret jumps. The only transition
+  on it is opacity, which is presentation, not invented data.
+
+Tests: `concord/provenance.test.ts`, "commit caret" — insertion at end of file,
+a mid-line replacement that must stop before the shared suffix, multi-hunk (the
+last one wins), an unchanged commit (no caret), and a first write.
 
 **Agent typing animation.** Same reason. The feed shows completed items, at the
 moment they were reported.
@@ -180,9 +208,14 @@ running turn. There is a real safe checkpoint here (`CONCORD-COMMIT:`, one per
 turn), but no handoff protocol, and inventing a button that does nothing is the
 exact failure mode this document exists to prevent.
 
-**Monaco.** A read-only viewer with attribution is a few hundred lines. Every
-change to a shared document goes through an Agent and then through CONCORD, so
-a hand-editable buffer would be a surface that must not be used.
+**Monaco — revised 2026-08-31.** The original argument was that a hand-editable
+buffer would be a surface that must not be used, since every change goes through
+an Agent and then through CONCORD. Human-in-the-loop editing is now a goal, so
+the premise changed rather than the reasoning. Monaco is in, and the editor owns
+no network call at all: saving is a prop (`onRequestSave`) whose implementation
+must go through the ordinary `POST /api/concord/docs/:docId` with an
+`expectedVersion`, so there is still exactly one write path and merge, conflict,
+denial and lease are unchanged. `editor/CodeEditor.tsx` documents the seam.
 
 ---
 

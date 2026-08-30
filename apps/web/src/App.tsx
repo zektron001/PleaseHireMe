@@ -55,7 +55,10 @@ export default function App() {
    * rebuilding the supplied UI out of scope, and the middleware is the only
    * thing being judged here.
    */
-  const [view, setView] = useState<"playground" | "console">("playground");
+  // The workbench is the product now; the Playground is reached from inside it
+  // (Go > Open the Agent Playground) and is unchanged, so the baseline
+  // Create -> Start -> Chat journey still works exactly as it shipped.
+  const [view, setView] = useState<"playground" | "console">("console");
   const [authInput, setAuthInput] = useState("");
   const messageEnd = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);

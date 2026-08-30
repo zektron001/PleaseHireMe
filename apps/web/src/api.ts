@@ -1,5 +1,6 @@
 import type { ActivityEvent, Agent, AgentRun, Consultation, Message, SystemInfo } from "./types";
 import type {
+  AgentContribution,
   AccessWarrant,
   AgentRouting,
   BlameView,
@@ -165,6 +166,15 @@ export const api = {
       "/api/concord/docs/" +
         encodeURIComponent(docId) +
         "/history?agentId=" +
+        encodeURIComponent(agentId),
+    ),
+  /** The commit log: one AgentContribution per accepted write. Never called
+   *  before the Source Control view existed. */
+  contributions: (docId: string, agentId: string) =>
+    asHuman<{ id: string; version: number; contributions: AgentContribution[] }>(
+      "/api/concord/docs/" +
+        encodeURIComponent(docId) +
+        "/contributions?agentId=" +
         encodeURIComponent(agentId),
     ),
   myConflicts: () =>
