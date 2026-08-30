@@ -11,6 +11,7 @@ import { z } from "zod";
 import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
+import type { HumanPrincipal } from "../warrant/types.js";
 import { ConsultationService } from "./consultation.js";
 import { runReiteration } from "./reiteration.js";
 import { ReviewService } from "./service.js";
@@ -61,6 +62,36 @@ export async function registerReviewRoutes(
     const human = plane.whoami(bearerToken(request));
     if (!human) throw new HttpError(401, "Sign in to continue");
     return human;
+  };
+
+  /**
+   * Running someone else's Agent is the decision WB-6 exists to refuse, and
+   * /api/warrant/subtasks/:id/run already records it either way. The review
+   * paths spend the same budget, occupy the same Agent and start the same
+   * container, so they make the same decision and write the same evidence -
+   * otherwise a reviewer could run a colleague's Agent with nothing in the
+   * chain naming who did it.
+   */
+  const requireOwnership = (human: HumanPrincipal, agentId: string) => {
+    const subtask = plane.orchestrator.subtaskByAgent(agentId);
+    if (!subtask) throw new HttpError(409, "That Agent is not assigned to a subtask");
+    const owned = subtask.ownerId === human.id;
+    plane.record({
+      humanId: human.id,
+      agentId,
+      action: "workspace.write",
+      resource: "ws:" + subtask.id,
+      decision: owned ? "Allow" : "Deny",
+      ruleId: owned ? "WB-0.owner-runs-agent" : "WB-6.cross-owner",
+      reason: owned
+        ? "The accountable human directed their own Agent through review"
+        : "Only " + subtask.ownerId + " may direct this Agent",
+      warrantId: subtask.warrantId,
+    });
+    if (!owned) {
+      throw new HttpError(403, "Only " + subtask.ownerId + " may direct this Agent");
+    }
+    return subtask;
   };
 
   /** Who should receive a comment on this range, from CONCORD provenance. */
@@ -119,6 +150,7 @@ export async function registerReviewRoutes(
     const human = requireHuman(request);
     const { commentIds } = reiterateBody.parse(request.body);
     const groups = review.planRuns(commentIds, human.id);
+    for (const group of groups) requireOwnership(human, group.agentId);
 
     const runs = await Promise.all(
       groups.map((group) =>
@@ -180,6 +212,7 @@ export async function registerReviewRoutes(
       throw new HttpError(400, "That Agent did not write the selected lines");
     }
 
+    requireOwnership(human, agentId);
     const consultation = await consultations.ask({
       docId: body.docId,
       agentId,

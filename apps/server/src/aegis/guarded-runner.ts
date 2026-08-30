@@ -184,7 +184,19 @@ export class GuardedAgentRunner implements AgentRunner {
         }
 
         const verdict = this.aegis.inspect(ticket, line);
-        if (!verdict) return true;
+        if (!verdict) {
+          // G3 has cleared this line. Only now is it handed to whatever the
+          // caller wanted to observe, and its answer is IGNORED: observation
+          // must never be able to abort a run, and a caller that throws must
+          // not take the guard down with it. AEGIS remains the only thing that
+          // can stop the stream.
+          try {
+            request.inspect?.(line);
+          } catch {
+            // An observer's failure is not the Agent's problem.
+          }
+          return true;
+        }
         live.violation = verdict;
         live.violatedAt = Date.now();
         return false;

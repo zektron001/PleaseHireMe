@@ -506,27 +506,33 @@ export class SharedDocStore {
       ): { version: number; content: string; contributionId: string } => {
         const previousContent = doc.content;
         const baseVersion = doc.version;
-        doc.content = next;
-        doc.version += 1;
-        doc.updatedAt = new Date(this.now()).toISOString();
-        doc.updatedBy = agentId;
+        const at = new Date(this.now()).toISOString();
+        const nextVersion = doc.version + 1;
 
-        // Attribution is updated inside the same critical section that commits
-        // the content, so the two can never disagree about who wrote what.
+        // Attribution is computed BEFORE anything is mutated. reconcileProvenance
+        // throws when it cannot keep one entry per line, and a half-applied
+        // commit - content advanced, attribution stale, nothing persisted - is
+        // far worse than a rejected write: blame would name the wrong Agent and
+        // the version would vanish on restart.
         const contributionId = randomUUID();
         const previous =
           doc.provenance.length > 0
             ? doc.provenance
-            : seedProvenance(docId, previousContent, baseVersion, doc.updatedAt).lines.slice();
+            : seedProvenance(docId, previousContent, baseVersion, at).lines.slice();
         const updated = reconcileProvenance({
           previous,
           previousContent,
           nextContent: next,
           agentId,
           contributionId,
-          version: doc.version,
-          at: doc.updatedAt,
+          version: nextVersion,
+          at,
         });
+
+        doc.content = next;
+        doc.version = nextVersion;
+        doc.updatedAt = at;
+        doc.updatedBy = agentId;
         doc.provenance = updated.lines.slice();
         doc.contributions.push({
           id: contributionId,

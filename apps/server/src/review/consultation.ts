@@ -137,9 +137,13 @@ export class ConsultationService {
     }
 
     const workspacePath = bound.request.workspacePath;
-    await this.reconciler.materialize(workspacePath, input.agentId, [input.docId]);
 
     try {
+      // Inside the try: this touches the filesystem, and a failure here must
+      // release the slot like any other. Outside it, an EACCES or ENOSPC left
+      // the Agent permanently "in_progress" and the consultation stuck at
+      // "running" with no completedAt.
+      await this.reconciler.materialize(workspacePath, input.agentId, [input.docId]);
       const result = await this.runner.run(bound.request);
       this.plane.orchestrator.setState(subtask.id, "assigned");
 

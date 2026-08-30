@@ -201,6 +201,13 @@ export async function registerWarrantRoutes(
       throw error;
     }
 
+    // The same guard consultation and re-iteration apply. Two concurrent turns
+    // for one Agent materialize into the same workspace and reconcile against
+    // the same stale checkout, so the second silently overwrites the first.
+    if (subtask.state === "in_progress") {
+      throw new HttpError(409, "That Agent is already running");
+    }
+
     const shared = plane.orchestrator.task(subtask.taskId)?.sharedPaths ?? [];
     const workspacePath = bound.request.workspacePath;
 
@@ -220,6 +227,14 @@ export async function registerWarrantRoutes(
         shared,
         { message: checkpoint, runId: subtaskId },
       );
+      // The turn is over, so the Agent is idle again. Without this the subtask
+      // stays "in_progress" for the life of the process: the failure path reset
+      // it and the success path never did. That was harmless while nothing read
+      // the state, and stopped being harmless once consultation and
+      // re-iteration began refusing an Agent that is already running.
+      // "submitted" is a separate step the owner takes; finishing a turn is not
+      // submitting it.
+      plane.orchestrator.setState(subtaskId, "assigned");
       return reply.code(200).send({
         subtaskId,
         agentId: subtask.agentId,
