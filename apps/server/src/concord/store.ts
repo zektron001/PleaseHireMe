@@ -25,9 +25,16 @@
  * then writing as two steps is exactly the TOCTOU above.
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { merge3, type MergeConflict } from "./merge.js";
+import {
+  reconcileProvenance,
+  seedProvenance,
+  type AgentContribution,
+  type LineProvenance,
+} from "./provenance.js";
 
 export type AuthzCheck = (
   agentId: string,
@@ -98,13 +105,42 @@ export interface SharedDoc {
   updatedAt: string;
   updatedBy: string | null;
   lease: Lease | null;
-  history: { version: number; agentId: string; humanId: string | null; at: string }[];
+  history: {
+    version: number;
+    agentId: string;
+    humanId: string | null;
+    at: string;
+    /** Agent-authored checkpoint message, when the Agent supplied one. */
+    message?: string;
+    contributionId?: string;
+  }[];
   conflicts: PendingConflict[];
+  /** One entry per line of `content`. See provenance.ts for the invariant. */
+  provenance: LineProvenance[];
+  /** Accepted Agent contributions, oldest first: the version-control log. */
+  contributions: AgentContribution[];
+}
+
+/** Optional metadata an Agent attaches when it judges a change a checkpoint. */
+export interface WriteOptions {
+  readonly message?: string | undefined;
+  readonly runId?: string | null | undefined;
 }
 
 export type WriteOutcome =
-  | { readonly status: "written"; readonly version: number; readonly content: string }
-  | { readonly status: "merged"; readonly version: number; readonly content: string; readonly hunks: number }
+  | {
+      readonly status: "written";
+      readonly version: number;
+      readonly content: string;
+      readonly contributionId: string;
+    }
+  | {
+      readonly status: "merged";
+      readonly version: number;
+      readonly content: string;
+      readonly hunks: number;
+      readonly contributionId: string;
+    }
   | {
       readonly status: "conflict";
       readonly version: number;
@@ -250,6 +286,13 @@ export class SharedDocStore {
       this.docs.set(doc.id, {
         ...restored,
         conflicts: restored.conflicts ?? [],
+        // Documents persisted before provenance existed are attributed to
+        // nobody rather than to whoever writes next.
+        provenance:
+          restored.provenance ??
+          seedProvenance(doc.id, restored.content, restored.version, restored.updatedAt)
+            .lines.slice(),
+        contributions: restored.contributions ?? [],
         lease: null,
       });
     }
@@ -357,6 +400,8 @@ export class SharedDocStore {
         lease: null,
         history: [],
         conflicts: [],
+        provenance: [],
+        contributions: [],
       };
       this.docs.set(docId, doc);
     }
@@ -413,6 +458,7 @@ export class SharedDocStore {
     agentId: string,
     expectedVersion: number,
     content: string,
+    options?: WriteOptions,
   ): Promise<WriteOutcome> {
     return this.serialize(docId, async () => {
       // Authority is checked here, inside the critical section, so a revocation
@@ -454,23 +500,62 @@ export class SharedDocStore {
         };
       }
 
-      const commit = (next: string): { version: number; content: string } => {
+      const commit = (
+        next: string,
+        outcome: "written" | "merged",
+      ): { version: number; content: string; contributionId: string } => {
+        const previousContent = doc.content;
+        const baseVersion = doc.version;
         doc.content = next;
         doc.version += 1;
         doc.updatedAt = new Date(this.now()).toISOString();
         doc.updatedBy = agentId;
+
+        // Attribution is updated inside the same critical section that commits
+        // the content, so the two can never disagree about who wrote what.
+        const contributionId = randomUUID();
+        const previous =
+          doc.provenance.length > 0
+            ? doc.provenance
+            : seedProvenance(docId, previousContent, baseVersion, doc.updatedAt).lines.slice();
+        const updated = reconcileProvenance({
+          previous,
+          previousContent,
+          nextContent: next,
+          agentId,
+          contributionId,
+          version: doc.version,
+          at: doc.updatedAt,
+        });
+        doc.provenance = updated.lines.slice();
+        doc.contributions.push({
+          id: contributionId,
+          documentId: docId,
+          agentId,
+          humanId: verdict.humanId,
+          runId: options?.runId ?? null,
+          baseVersion,
+          resultingVersion: doc.version,
+          outcome,
+          changedLineIds: updated.changedLineIds,
+          summary: summariseContribution(options?.message, updated.changedLineIds.length),
+          createdAt: doc.updatedAt,
+        });
+
         doc.history.push({
           version: doc.version,
           agentId,
           humanId: verdict.humanId,
           at: doc.updatedAt,
+          ...(options?.message ? { message: boundedMessage(options.message) } : {}),
+          contributionId,
         });
         this.bases.set(this.baseKey(docId, agentId), next);
-        return { version: doc.version, content: next };
+        return { version: doc.version, content: next, contributionId };
       };
 
       if (expectedVersion === doc.version) {
-        const result = commit(content);
+        const result = commit(content, "written");
         await this.persist();
         this.emit({
           docId,
@@ -487,7 +572,7 @@ export class SharedDocStore {
       const base = this.bases.get(this.baseKey(docId, agentId)) ?? "";
       const merged = merge3(base, content, doc.content);
       if (merged.ok) {
-        const result = commit(merged.content);
+        const result = commit(merged.content, "merged");
         await this.persist();
         this.emit({
           docId,
@@ -591,11 +676,38 @@ export class SharedDocStore {
         };
       }
 
+      const previousContent = doc.content;
+      const baseVersion = doc.version;
       doc.content = merged.content;
       doc.version += 1;
       doc.updatedAt = new Date(this.now()).toISOString();
       doc.updatedBy = humanId;
-      doc.history.push({ version: doc.version, agentId: humanId, humanId, at: doc.updatedAt });
+
+      // The human's decision is an accepted change like any other: attribution
+      // must follow it, or provenance drifts out of line with the content.
+      const resolutionId = randomUUID();
+      const resolvedProvenance = reconcileProvenance({
+        previous:
+          doc.provenance.length > 0
+            ? doc.provenance
+            : seedProvenance(docId, previousContent, baseVersion, doc.updatedAt).lines.slice(),
+        previousContent,
+        nextContent: merged.content,
+        // Lines the human settled are attributed to the human, not to either Agent.
+        agentId: humanId,
+        contributionId: resolutionId,
+        version: doc.version,
+        at: doc.updatedAt,
+      });
+      doc.provenance = resolvedProvenance.lines.slice();
+      doc.history.push({
+        version: doc.version,
+        agentId: humanId,
+        humanId,
+        at: doc.updatedAt,
+        message: "resolved conflict " + conflictId,
+        contributionId: resolutionId,
+      });
       doc.conflicts = doc.conflicts.filter((item) => item.id !== conflictId);
       // The Agent that lost now has the resolved text as its base, so its next
       // write rebases onto the human's decision instead of re-conflicting.
@@ -758,9 +870,38 @@ export class SharedDocStore {
   }
 
   /** Test and demo seam: sets initial content without an authority check. */
+  /** One entry per line of the document's current canonical content. */
+  provenanceOf(docId: string): readonly LineProvenance[] {
+    return structuredClone(this.docs.get(docId)?.provenance ?? []);
+  }
+
+  /** Accepted contributions, oldest first. The version-control log. */
+  contributionsOf(docId: string): AgentContribution[] {
+    return structuredClone(this.docs.get(docId)?.contributions ?? []);
+  }
+
   seed(docId: string, content: string): void {
     const doc = this.ensure(docId);
     doc.content = content;
+    doc.provenance = seedProvenance(docId, content, 1, doc.updatedAt).lines.slice();
     doc.version = 1;
   }
+}
+
+const MAX_MESSAGE = 200;
+
+function boundedMessage(message: string): string {
+  const collapsed = message.replace(/\s+/g, " ").trim();
+  return collapsed.length > MAX_MESSAGE
+    ? collapsed.slice(0, MAX_MESSAGE - 1) + "\u2026"
+    : collapsed;
+}
+
+/** Safe summary for the log: never the compiled prompt, never the whole file. */
+function summariseContribution(
+  message: string | undefined,
+  changedLines: number,
+): string {
+  const suffix = changedLines === 1 ? "1 line changed" : changedLines + " lines changed";
+  return message ? boundedMessage(message) + " (" + suffix + ")" : suffix;
 }
