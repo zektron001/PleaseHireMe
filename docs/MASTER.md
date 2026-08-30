@@ -11,7 +11,7 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **324 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **358 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
 | **See it in a browser** | sidebar → **Middleware console** |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
@@ -173,6 +173,8 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | D14 | Concurrency outcomes in the audit chain (`C.concord`) | CONCORD | C7 closed |
 | D15 | Line provenance + Agent-authored checkpoint commits | CONCORD | 29 tests; blame and a commit log per document |
 | D16 | Review loop: comment, consult, re-iterate, resolve | CONCORD | 35 tests incl. 10 over real HTTP |
+| D17 | **Agent id is no longer a credential** | WARRANT | 12 tests. `/api/warrant/tasks` was anonymous and published Agent ids; CONCORD and review accepted one as their only identity. Closed at the HTTP boundary. |
+| D18 | Live collaboration plane: Agent Live (SSE), sessions, people, queue, usage, access | all | 17 tests, 2 over a real socket. Verified live against Ark: 12 real frames from one Codex turn. |
 
 ### Open — claim a row
 
@@ -192,11 +194,16 @@ So three people are not editing `store.ts` at once — which would be ironic:
 
 | **R12** | **Live Ark run of the review loop** | CONCORD | `@___` | `TODO` | 2026-08-30 | Every review test stubs Codex. A real model has never revised code through re-iteration or answered a consultation. The path is the same one R2/R3 already proved with a live turn, so this is a rehearsal item, not a build item. |
 | **R13** | **Persist consultations** | CONCORD | `@___` | `TODO` | 2026-08-30 | Comments, runs and review events persist; consultations do not. Same `persistPath` pattern as `ReviewService`. Small. |
+| **R14** | **Look at the console in a browser** | web | `@___` | `TODO` | 2026-08-31 | Still nobody's eyes on it - now more urgent, because there is far more of it. Every module compiles, builds and is served by Vite, and every route behind it is live-verified, but no human has seen the layout. **Do this before demoing.** Was the second half of R7. |
+| **R15** | **Live Ark run of the review loop** *(see R12)* | CONCORD | `@___` | `TODO` | 2026-08-31 | Narrowed: the TURN path is now live-verified end to end including the activity feed. What is still stubbed is a real model answering a consultation or revising through re-iteration. |
+| **R16** | **AEGIS hardened profile with the live feed attached** | AEGIS | `@___` | `TODO` | 2026-08-31 | The tap sits behind the guarded runner's own `inspect` and its return value is ignored, so a hardened run should be unaffected. Not measured. AEGIS owner's call. |
 
 ### Priority if time runs short
 
-**R9 > R11 > R10.** R1 through R8 are done. R9 (rehearse) is the top item and
-nothing replaces it.
+**R14 > R9 > R11 > R10.** R1 through R8 are done. R14 (look at the console in a
+browser) now sits above the rehearsal, because there is a great deal more UI
+than there was and not one pixel of it has been seen by a human. R9 (rehearse)
+is next and nothing replaces it.
 
 **R2 moved up because it is not a polish item any more.** A real Agent turn only
 runs with the middleware *disabled*, so the sentence "the middleware runs in a
@@ -211,7 +218,7 @@ concrete fixes are in the changelog; neither looks large.
 ```bash
 npm install
 
-# Everything: typecheck + 255 tests + build. This must stay green.
+# Everything: typecheck + 358 tests + build. This must stay green.
 npm run check
 
 # The Track B story in the terminal — no Ark key, no Docker needed.
@@ -246,6 +253,8 @@ ARK_API_KEY=... ARK_MODEL=ep-... npm run poc
 | **MASTER.md** (this file) | The single reference + roadmap | everyone, daily |
 | [WARRANT_TRACK_B.md](WARRANT_TRACK_B.md) | The judged track: delegation and authorization | everyone |
 | [CONCORD_SHARED_STATE.md](CONCORD_SHARED_STATE.md) | Shared concurrent state, races, merge | the CONCORD 3 |
+| [CONCORD_REVIEW_LOOP.md](CONCORD_REVIEW_LOOP.md) | Provenance, comments, consultation, re-iteration | the CONCORD 3 |
+| [AMOEBA_INSPIRATION_SCOPE.md](AMOEBA_INSPIRATION_SCOPE.md) | The multiplayer-IDE reel: what we took, adapted and refused, and what is verified | everyone before the demo |
 | [MIDDLEWARE_ARCHITECTURE.md](MIDDLEWARE_ARCHITECTURE.md) | AEGIS: layered architecture, gates, formal policy | the AEGIS 2 |
 | [THREAT_MODEL.md](THREAT_MODEL.md) | All seven threats, honest implemented/partial/not-built | everyone before the demo |
 | [../SECURITY.md](../SECURITY.md) | What the fork adds, and what is still missing | everyone before the demo |
@@ -263,7 +272,7 @@ Fitting, given what we are building:
 1. **One person per module at a time.** If two of you must touch `store.ts`, say so in the
    team chat first. We built a whole middleware about this problem; let us not demonstrate it
    on ourselves.
-2. **`npm run check` must be green before you push.** 255 tests. If you break one, fix it or
+2. **`npm run check` must be green before you push.** 358 tests. If you break one, fix it or
    revert — do not leave it red for someone else to find at 2am.
 3. **Every new control needs a positive *and* a negative test.** The negative one is the
    point. "It allows the good case" proves nothing about a security control.
@@ -296,6 +305,7 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
+- `2026-08-31` · `@jemy` · **Live collaboration plane landed (D18), and an authorization hole closed (D17).** The hole first: `/api/warrant/tasks` was anonymous and hands out `agentId`s, and CONCORD/review accepted a bare `agentId` as their only identity - so two GETs and a POST let a stranger write another human's shared documents, with `APP_AUTH_TOKEN` set or not. An Agent id is now a *selector* for one of your own delegations, checked against the session (`warrant/access.ts`). Then the reel features: **Agent Live** streams the runtime's own Codex event feed over SSE, tapped where AEGIS already inspects it, so every row is something that really happened; plus sessions dashboard, people, queue, usage, an access sheet that renders warrant scopes as roles, participant colours, syntax-coloured blame gutter, and a Problems panel. 358 tests. **Verified live against Ark: 12 real frames from one turn, correctly scoped.** Two bugs found by running it, not by tests - the stream captured the viewer's scope at connect time, and Node held the SSE headers until the first write. Both fixed with regression tests over a real socket. Refused on purpose: live cursors and typing animation (the runtime reports items, not keystrokes). Full write-up: [AMOEBA_INSPIRATION_SCOPE.md](AMOEBA_INSPIRATION_SCOPE.md).
 - `2026-08-30` · `@jemy` · **R11 premise re-measured.** A container on an `--internal` network *can* reach a host process, if that process binds the network's own bridge gateway rather than `0.0.0.0` or docker0 - internet still `ENETUNREACH` from the same container. If it reproduces, the dual-homed sidecar is unnecessary. Left R11 open: the AEGIS owner's call, not mine.
 - `2026-08-30` · `@jemy` · **Review loop landed (D16).** A reviewer selects lines, CONCORD provenance says which Agent wrote them, and the comment is routed there. Consultation is explanation-only *structurally* - it never reconciles, so a hostile Agent that rewrites the file during one changes nothing (test at the HTTP boundary proves it). Re-iteration returns through `store.write()`, so merge/conflict/denied are unchanged. Comments become `addressed`, never `resolved`: only a human resolves. 324 tests. **Not yet run against a live Ark model - see R12.**
 - `2026-08-30` · `@jemy` · **Line provenance + Agent checkpoint commits (D15).** Every line carries the Agent that last changed it, reconciled inside the commit funnel with the existing `diffLines` - no new dependency. Agents name their own commits via `CONCORD-COMMIT:`, so the log reads like a history rather than a change counter. Two Agents committing to one file from the same base merge, and each line keeps its own author. Also fixed a real race: both run paths checked "already running" and claimed the slot only after an await.
