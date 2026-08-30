@@ -81,11 +81,21 @@ describe("G2 hardened sandbox profile", () => {
     expect(args).toContain("AEGIS_RUN_TOKEN=token-123");
   });
 
-  it("re-mounts the Codex home read-only (KS-3)", () => {
+  it("pins the Codex config read-only, and only the config (KS-3)", () => {
     const args = hardenContainerArgs(baseline, options);
-    const mount = args.find((a) => a.includes("dst=/codex-home"));
+    const mount = args.find((a) => a.includes("dst=/codex-home/config.toml"));
     expect(mount).toBe(
-      "type=bind,src=/home/u/codex-home,dst=/codex-home,readonly",
+      "type=bind,src=/home/u/codex-home/config.toml,dst=/codex-home/config.toml,readonly",
+    );
+
+    // The home itself must stay writable: Codex puts its sessions, sqlite state
+    // and shell snapshots there, so a read-only home is not a hardened run - it
+    // is no run at all. This assertion is the one that would have caught it.
+    expect(args).toContain("type=bind,src=/home/u/codex-home,dst=/codex-home");
+
+    // And the file mount has to be applied after the directory it sits inside.
+    expect(args.indexOf(mount as string)).toBeGreaterThan(
+      args.indexOf("type=bind,src=/home/u/codex-home,dst=/codex-home"),
     );
   });
 

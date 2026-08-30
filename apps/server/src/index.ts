@@ -30,6 +30,17 @@ const app = await createApp(
   runner,
 );
 
+// One line, at startup, about whether a hardened run can actually complete.
+// The alternative is finding out at the end of a turn, from an error that names
+// the wrong cause.
+if (aegis) {
+  const ready = aegis.liveRunPossible;
+  app.log[ready.ok ? "info" : "warn"](
+    { network: aegis.network, broker: aegis.broker },
+    "AEGIS: " + ready.reason,
+  );
+}
+
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, "Shutting down");
   await app.close();

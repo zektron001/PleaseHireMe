@@ -11,7 +11,7 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **240 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **246 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
 | **See it in a browser** | sidebar → **Middleware console** |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
@@ -176,8 +176,8 @@ So three people are not editing `store.ts` at once — which would be ironic:
 
 | ID | Item | Area | Owner | Status | Updated | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| **R1** | **Egress broker** — makes network confinement topological, not just detective | AEGIS | `@___` | `TODO` | — | RR-2. Highest-value gap. `hardenContainerArgs` already emits the flags. |
-| **R2** | **Live container run** under the hardened profile | AEGIS | `@___` | `BLOCKED` | 2026-08-30 | RR-3. **Tried it. It does not run.** Two blockers found: (1) nothing ever creates the `aegis-egress` docker network, so the container exits 125 immediately; (2) past that, Codex dies with `Read-only file system (os error 30)` - the hardened profile leaves it nowhere writable. With `AEGIS_ENABLED=false` the same turn succeeds in 9.7s. See the changelog. |
+| **R1** | **Egress broker** — makes network confinement topological, not just detective | AEGIS | `@___` | `TODO` | 2026-08-30 | RR-2. **Now the blocker for R2, not just a nice-to-have.** `hardenContainerArgs` already emits the flags and the container is already told `AEGIS_BROKER` and a run token; nothing listens there. Until it does, no turn can run with AEGIS on, because KS-7 correctly strips the key the broker was supposed to supply. |
+| **R2** | **Live container run** under the hardened profile | AEGIS | `@jemy` | `BLOCKED on R1` | 2026-08-30 | Two of three blockers fixed: the `aegis-egress` network is now created at bootstrap, and KS-3 pins `config.toml` instead of the whole Codex home. The third is not a bug - KS-7 withholds the Ark key because the **broker** was meant to hold it, so a hardened turn needs R1. A live container turn DOES run and reconcile with `AEGIS_ENABLED=false`. The server now warns at startup instead of failing later with a misleading error. |
 | **R3** | **Agents write through CONCORD** instead of straight to their workspace | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C6 closed. `POST /api/warrant/subtasks/:id/run` materializes before the turn and reconciles after. Verified with a REAL Codex container turn: `written` v2, 23k tokens. Turn-granular, not per-write - the code says so. |
 | **R4** | **Conflict resolution UI** — show both sides, owner picks | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C5 closed. Both sides with the contested lines marked; keep theirs / ours / both. Only the owning human (or the orchestrator) may settle. |
 | **R5** | **Persist CONCORD documents** across restart | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C1 closed. Atomic tmp+rename, mode 0600. Verified live: v8 and an open conflict survived a process restart. Leases are NOT persisted, on purpose. |
@@ -205,7 +205,7 @@ concrete fixes are in the changelog; neither looks large.
 ```bash
 npm install
 
-# Everything: typecheck + 240 tests + build. This must stay green.
+# Everything: typecheck + 246 tests + build. This must stay green.
 npm run check
 
 # The Track B story in the terminal — no Ark key, no Docker needed.
@@ -257,7 +257,7 @@ Fitting, given what we are building:
 1. **One person per module at a time.** If two of you must touch `store.ts`, say so in the
    team chat first. We built a whole middleware about this problem; let us not demonstrate it
    on ourselves.
-2. **`npm run check` must be green before you push.** 240 tests. If you break one, fix it or
+2. **`npm run check` must be green before you push.** 246 tests. If you break one, fix it or
    revert — do not leave it red for someone else to find at 2am.
 3. **Every new control needs a positive *and* a negative test.** The negative one is the
    point. "It allows the good case" proves nothing about a security control.
@@ -290,7 +290,8 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
-- `2026-08-30` · `@jemy` · **AEGIS hardened profile has never run a real turn.** `aegis-egress` is created by nothing (container exits 125); past that Codex hits a read-only rootfs. Needs the network created (or `AEGIS_NETWORK_MODE` set) plus a writable tmpfs for HOME/tmp. Unhardened, the same turn works.
+- `2026-08-30` · `@jemy` · AEGIS: network now created at bootstrap; KS-3 pins `config.toml` rather than the whole Codex home (the blanket mount stopped Codex writing its own sessions, so no turn could ever run). Remaining blocker for a hardened live run is **R1, the broker** - KS-7 strips the key it was meant to supply. Startup now says this out loud.
+- `2026-08-30` · `@jemy` · **AEGIS hardened profile had never run a real turn.** Found by trying it: `aegis-egress` was created by nothing (container exits 125), then Codex hit the read-only home. Unhardened, the same turn works.
 - `2026-08-30` · `@jemy` · Ark key is an **international** endpoint: `ARK_BASE_URL=https://ark.ap-southeast.volces.com/api/v3`. The cn-beijing default 401s.
 - `2026-08-30` · `@jemy` · R3/R4/R5/R6/R7/R8 landed (240 tests). Agents write through CONCORD; documents persist; presence; conflict resolution; middleware console in the browser.
 - `2026-08-30` · `@jemy` · Closed two CONCORD authorization holes: `list`/`history` were ungated and `releaseLease` never checked authority (209 tests). Fixed beat 10 of the demo, which had been crashing on a 401 since trace access control landed.

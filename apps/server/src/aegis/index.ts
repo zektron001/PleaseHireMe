@@ -23,6 +23,12 @@ import { bundleHash, createBundle } from "./policy/bundle.js";
 import { Redactor } from "./redact.js";
 import { BreakerRegistry, DEFAULT_BREAKER } from "./state/breaker.js";
 import { BudgetLedger, DEFAULT_LEDGER } from "./state/ledger.js";
+import {
+  ensureNetwork,
+  probeBroker,
+  type BrokerReadiness,
+  type NetworkReadiness,
+} from "./sandbox/network.js";
 import { KillLatch } from "./state/latch.js";
 import { SECCOMP_STRICT } from "./sandbox/seccomp.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -99,6 +105,44 @@ export class Aegis {
     return this.liveRuns.size;
   }
 
+  /** Filled at bootstrap. Surfaced in status() so the gap is visible, not silent. */
+  network: NetworkReadiness | null = null;
+  broker: BrokerReadiness | null = null;
+
+  /**
+   * Can a hardened container actually complete a turn right now?
+   *
+   * KS-7 withholds the Ark key from the container, so the answer is no unless
+   * the broker is up. Stated here once, in one place, rather than discovered as
+   * a misleading error at the end of a run.
+   */
+  get liveRunPossible(): { ok: boolean; reason: string } {
+    if (this.network && this.network.status === "unavailable") {
+      return {
+        ok: false,
+        reason:
+          "Container network '" +
+          this.network.name +
+          "' is unavailable: " +
+          (this.network.detail ?? "unknown"),
+      };
+    }
+    if (this.broker && !this.broker.reachable) {
+      return {
+        ok: false,
+        reason:
+          "KS-7 withholds ARK_API_KEY from the container and no egress broker is " +
+          "listening at " +
+          this.broker.url +
+          " (" +
+          this.broker.detail +
+          "), so the Agent cannot reach the model. This is RR-2, not a bad key. " +
+          "Build the broker, or set AEGIS_ENABLED=false for an unhardened run.",
+      };
+    }
+    return { ok: true, reason: "Hardened profile is complete" };
+  }
+
   static async bootstrap(config: AppConfig): Promise<Aegis> {
     const vaultPath = path.resolve(config.aegisVaultPath);
     const redactor = new Redactor([config.arkApiKey, config.authToken]);
@@ -149,7 +193,7 @@ export class Aegis {
     );
     await audit.initialize();
 
-    return new Aegis(
+    const aegis = new Aegis(
       engine,
       audit,
       ledger,
@@ -163,6 +207,12 @@ export class Aegis {
       config.aegisMaxSteps,
       config.aegisMaxConcurrentRuns,
     );
+
+    // KS-1 - the network named in the profile has to actually exist, or every
+    // hardened container dies at exit 125 before a single control is exercised.
+    aegis.network = await ensureNetwork(config.containerEngine, config.aegisNetworkMode);
+    aegis.broker = await probeBroker(config.aegisBrokerUrl);
+    return aegis;
   }
 
   context(runId: string, gate: GateId, prompt: string, estimate = 0): PolicyContext {
@@ -325,6 +375,12 @@ export class Aegis {
       budget: this.ledger.snapshot(),
       chainHead: this.audit.chainHead.slice(0, 12),
       networkMode: this.networkMode,
+      // Honest about what the network mode is actually delivering today. A
+      // dedicated bridge is not egress confinement; `internal: false` is the
+      // difference between the claim and the current state.
+      network: this.network,
+      broker: this.broker,
+      liveRunPossible: this.liveRunPossible,
       vaultPath: this.vaultPath,
       maxSteps: this.maxSteps,
       activeRuns: this.activeRuns,
