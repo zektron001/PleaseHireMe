@@ -140,7 +140,15 @@ export function createBundle(options: BundleOptions): PolicyBundle {
         const target = pathOf(r.resource);
         if (target === null) return false;
         if (r.action !== "fs.read" && r.action !== "fs.write") return false;
-        if (isInside(options.workspaceMount, target)) return false;
+        // The run's OWN workspace when it named one, and the configured mount
+        // otherwise. These differ by runtime: the container binds the
+        // workspace at `workspaceMount`, while `local-process` leaves it at a
+        // host path. Comparing against the mount unconditionally refused every
+        // Agent that named its own cwd absolutely - which Codex does
+        // constantly - so no local turn survived its first `find`.
+        if (isInside(r.context.workspacePath ?? options.workspaceMount, target)) {
+          return false;
+        }
         // A write anywhere outside the workspace is always refused; a read is
         // refused unless it is one of the read-only system paths a toolchain
         // legitimately needs.
@@ -162,7 +170,10 @@ export function createBundle(options: BundleOptions): PolicyBundle {
         const target = pathOf(r.resource);
         if (target === null) return false;
         if (r.action !== "fs.read" && r.action !== "fs.write") return false;
-        return isInside(options.workspaceMount, target) && !namesVault(target);
+        return (
+          isInside(r.context.workspacePath ?? options.workspaceMount, target) &&
+          !namesVault(target)
+        );
       },
     },
     {

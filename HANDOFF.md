@@ -22,7 +22,7 @@ anything about what is or is not implemented.**
 | | |
 | --- | --- |
 | Branch | `main`, pushed |
-| Tests | **358**, `npm run check` green (typecheck + tests + build) |
+| Tests | **403**, `npm run check` green (typecheck + tests + build) |
 | Declared track | **B — The Bouncer**. Do not change it without the team. |
 | Ark | configured and **live-verified** — real turns, and the live activity feed carries their real event stream |
 
@@ -39,7 +39,7 @@ That is the everyday setup. Codex runs in-process (`RUNTIME_PROVIDER=local-proce
 **no Docker needed**, and the chat works.
 
 ```bash
-npm run check              # typecheck + 358 tests + build
+npm run check              # typecheck + 403 tests + build
 npm run demo:warrant       # 10-beat Track B story, ~2s, no key or Docker
 npm run poc                # full container POC — only for the AEGIS sandbox demo
 ```
@@ -79,6 +79,14 @@ All in `main`. Full design write-up: `docs/CONCORD_REVIEW_LOOP.md`.
    colours, and syntax colouring. Design write-up and the honest scorecard:
    `docs/AMOEBA_INSPIRATION_SCOPE.md`.
 6. **The `agentId` authorization hole is closed** (`warrant/access.ts`). See §5a.
+7. **v2 — one file, many Agents.** The product is now a SINGLE operator who
+   splits a goal into pieces, gets one Agent per piece and **one section of the
+   file per Agent**, enforced by CONCORD (`concord/sections.ts`). Monaco editor
+   with human autosave through CONCORD; live per-Agent screens fed by real
+   workspace polling; run / stop / auto mode; a merge gate. Consulting is
+   confirm-yes/no from provenance, not typing an id.
+   **Read `docs/MULTI_AGENT_V2.md` before touching any of it** — especially §6,
+   which lists five AEGIS false positives that were killing every local turn.
 
 ## 5. Outstanding — read before demoing
 
@@ -110,6 +118,20 @@ without talking to them.**
 | `concord/routes.ts:144` | `{choice:"content", content:""}` is rejected by a falsy check — emptying a contested file is legitimate and should use `=== undefined`. |
 
 
+### 5a-bis. AEGIS: the one to raise with its owner
+
+Five precision fixes landed in AEGIS because **every local turn was dying**.
+`WORKSPACE_MOUNT` is the container path, so under `RUNTIME_PROVIDER=local-process`
+an Agent naming its own cwd absolutely was contained. Then globs, here-document
+bodies, escaped slashes, relative paths and shell-concatenated quotes each read
+as an escape attempt. All fixed, all tested.
+
+**The structural issue is open and is theirs to decide (`R17`).** `fs.read`
+requests are derived by scanning shell TEXT, and that is enough to kill a run —
+but shell text cannot be parsed reliably. Suggested shape: record heuristic
+extractions, and reserve containment for `file_change` events, which Codex
+reports structurally. Until then the prompts give Agents no reason to shell out.
+
 ### 5b. Not verified
 
 - **Nobody has looked at the UI in a browser.** Still true, and now it matters
@@ -124,6 +146,9 @@ without talking to them.**
   The tap sits behind the guarded runner's own `inspect` and its return value
   is ignored, so it should be unaffected — but "should" is not "was". (`R16`)
 - Consultations are in memory; comments, runs and events persist. (`R13`)
+- **A three-of-three clean parallel run.** Best measured is all three sections
+  filled with one Agent contained partway — its partial work still reconciled
+  safely, which is the design working, but it is not the same claim. (`R17`)
 
 ### 5c. Two bugs the tests could not have caught
 

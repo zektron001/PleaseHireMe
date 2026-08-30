@@ -79,6 +79,8 @@ export class Orchestrator {
     const taskId = "task_" + randomUUID();
     const timestamp = new Date(this.now()).toISOString();
     const created: Subtask[] = [];
+    /** Headings already handed out in this split, so no two Agents share one. */
+    const takenSections = new Set<string>();
 
     proposals.forEach((proposal, index) => {
       const subtaskId = "sub_" + randomUUID();
@@ -107,6 +109,27 @@ export class Orchestrator {
         ...(input.warrantTtlMs === undefined ? {} : { ttlMs: input.warrantTtlMs }),
       });
 
+      // One section per subtask, named after the subtask. Exclusive by
+      // construction: the heading carries the subtask id's prefix, so two
+      // proposals with the same title still get two distinct sections rather
+      // than silently sharing one - which would put both Agents on the same
+      // lines and defeat the allocation entirely.
+      const sectionDoc = input.sharedPaths?.[0] ?? null;
+      let section: string | null = null;
+      if (sectionDoc) {
+        let heading = "## " + proposal.title;
+        // A splitter that returns two identically titled proposals would
+        // otherwise put two Agents on one section - which is precisely the
+        // collision the allocation exists to prevent.
+        let suffix = 2;
+        while (takenSections.has(heading)) {
+          heading = "## " + proposal.title + " (" + suffix + ")";
+          suffix += 1;
+        }
+        takenSections.add(heading);
+        section = heading;
+      }
+
       const subtask: Subtask = {
         id: subtaskId,
         taskId,
@@ -116,6 +139,8 @@ export class Orchestrator {
         agentId,
         model: selectModel(shape, this.tiers),
         paths: proposal.paths,
+        section,
+        sectionDoc,
         state: "assigned",
         warrantId: warrant.id,
         approvedBy: null,

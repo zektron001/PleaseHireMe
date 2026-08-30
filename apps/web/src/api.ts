@@ -11,6 +11,9 @@ import type {
   PlannedTask,
   ReiterationRun,
   ReviewComment,
+  SectionAllocation,
+  Subtask,
+  WorkspaceFrame,
   LiveBoard,
   ReviewState,
   RunReport,
@@ -233,6 +236,58 @@ export const api = {
     asHuman<{ consultations: Consultation[] }>(
       "/api/review/docs/" + encodeURIComponent(docId) + "/consultations",
     ),
+
+  // ------------------------------------ orchestration, editing, live screens
+  /** A direct human save. No agentId: the human is writing, not an Agent. */
+  saveDoc: (docId: string, body: { expectedVersion: number; content: string; message?: string }) =>
+    asHuman<{ outcome: { status: string; version?: number; content?: string } }>(
+      "/api/concord/docs/" + encodeURIComponent(docId),
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  sections: (docId: string, agentId: string) =>
+    asHuman<{ docId: string; allocations: SectionAllocation[] }>(
+      "/api/concord/docs/" +
+        encodeURIComponent(docId) +
+        "/sections?agentId=" +
+        encodeURIComponent(agentId),
+    ),
+  stopSubtask: (subtaskId: string) =>
+    asHuman<{ stopped: boolean }>(
+      "/api/warrant/subtasks/" + encodeURIComponent(subtaskId) + "/stop",
+      { method: "POST" },
+    ),
+  autorun: (taskId: string, prompt?: string) =>
+    asHuman<{ started: { subtaskId: string; agentId: string; title: string }[] }>(
+      "/api/warrant/tasks/" + encodeURIComponent(taskId) + "/autorun",
+      json(prompt ? { prompt } : {}),
+    ),
+  approve: (subtaskId: string) =>
+    asHuman<{ subtask: Subtask }>(
+      "/api/warrant/subtasks/" + encodeURIComponent(subtaskId) + "/approve",
+      { method: "POST" },
+    ),
+  integrate: (taskId: string) =>
+    asHuman<{ task: PlannedTask["task"] }>(
+      "/api/warrant/tasks/" + encodeURIComponent(taskId) + "/integrate",
+      { method: "POST" },
+    ),
+  workspaces: () =>
+    asHuman<{ viewer: string; frames: WorkspaceFrame[] }>("/api/live/workspaces"),
+  /** The live screens' push channel. Separate stream: a frame is a whole file. */
+  workspaceStream: (onFrame: (frame: WorkspaceFrame) => void): (() => void) => {
+    if (!sessionToken) return () => {};
+    const source = new EventSource(
+      "/api/live/workspace-stream?token=" + encodeURIComponent(sessionToken),
+    );
+    source.onmessage = (message) => {
+      try {
+        onFrame(JSON.parse(message.data) as WorkspaceFrame);
+      } catch {
+        // A malformed frame is dropped rather than breaking the stream.
+      }
+    };
+    return () => source.close();
+  },
 
   // ------------------------------------------------------- live plane
   board: () => asHuman<LiveBoard>("/api/live/board"),

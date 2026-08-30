@@ -30,6 +30,12 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { merge3, type MergeConflict } from "./merge.js";
 import {
+  findOutOfBounds,
+  locateSection,
+  SectionRegistry,
+  type SectionAllocation,
+} from "./sections.js";
+import {
   reconcileProvenance,
   seedProvenance,
   type AgentContribution,
@@ -254,6 +260,11 @@ export class SharedDocStore {
   private readonly presence = new Map<string, Map<string, PresenceEntry>>();
   private persistQueue: Promise<void> = Promise.resolve();
   private conflictSeq = 0;
+  /**
+   * Who owns which section. Empty for a document nobody allocated, which is
+   * what leaves every unallocated document behaving exactly as it always did.
+   */
+  readonly sections = new SectionRegistry();
 
   constructor(
     private readonly authorize: AuthzCheck,
@@ -500,6 +511,60 @@ export class SharedDocStore {
         };
       }
 
+      /**
+       * Section ownership, checked here for the same reason authority is: this
+       * is the only point at which "what is committed" is known. It runs on the
+       * DIFF, not on the payload - an Agent rewriting its own section still
+       * hands back the whole file, so the question is what it changed.
+       *
+       * A refusal is a denial, not a conflict: the Agent had no business
+       * touching those lines, and nothing about the document is contested.
+       */
+      const outOfBounds = (next: string): { ruleId: string; reason: string } | null => {
+        if (!this.sections.isAllocated(docId)) return null;
+        const heading = this.sections.headingFor(docId, agentId);
+        if (heading === null) {
+          return {
+            ruleId: "CD-section.not-allocated",
+            reason:
+              "This document allocates sections and none is allocated to this Agent",
+          };
+        }
+        const range = locateSection(doc.content, heading);
+        if (range === null) {
+          // The heading is gone - a human deleted or renamed it. Refusing is
+          // the safe direction: guessing a new boundary would let an Agent
+          // write anywhere the moment its anchor moved.
+          return {
+            ruleId: "CD-section.missing",
+            reason: "The section \"" + heading + "\" is no longer in the document",
+          };
+        }
+        const violation = findOutOfBounds(doc.content, next, range);
+        if (!violation) return null;
+        return {
+          ruleId: "CD-section.outside",
+          reason:
+            "Allocated \"" + heading + "\" (lines " +
+            range.startLine + "-" + range.endLine + "), but the write " +
+            violation.reason,
+        };
+      };
+
+      const refuseOutOfBounds = (
+        breach: { ruleId: string; reason: string },
+      ): { status: "denied"; ruleId: string; reason: string } => {
+        this.emit({
+          docId,
+          actorId: agentId,
+          humanId: verdict.humanId,
+          outcome: "denied",
+          version: doc.version,
+          detail: { ruleId: breach.ruleId, reason: breach.reason },
+        });
+        return { status: "denied" as const, ...breach };
+      };
+
       const commit = (
         next: string,
         outcome: "written" | "merged",
@@ -561,6 +626,8 @@ export class SharedDocStore {
       };
 
       if (expectedVersion === doc.version) {
+        const breach = outOfBounds(content);
+        if (breach) return refuseOutOfBounds(breach);
         const result = commit(content, "written");
         await this.persist();
         this.emit({
@@ -578,6 +645,11 @@ export class SharedDocStore {
       const base = this.bases.get(this.baseKey(docId, agentId)) ?? "";
       const merged = merge3(base, content, doc.content);
       if (merged.ok) {
+        // Checked on the MERGED result, which is what would actually land. A
+        // merge can only carry this Agent's own hunks, so a clean merge that
+        // reaches outside the section means the Agent did reach outside it.
+        const breach = outOfBounds(merged.content);
+        if (breach) return refuseOutOfBounds(breach);
         const result = commit(merged.content, "merged");
         await this.persist();
         this.emit({
@@ -622,6 +694,140 @@ export class SharedDocStore {
         content: doc.content,
         conflicts: merged.conflicts,
         conflictId: pending.id,
+      };
+    });
+  }
+
+  /**
+   * A direct human edit — the thing a VSCode-shaped surface has to be able to
+   * do, and the thing this store previously could not.
+   *
+   * Three deliberate differences from an Agent write:
+   *
+   *   No warrant.  A warrant is a delegation FROM this human. Asking them to
+   *                hold one to edit their own document would be circular.
+   *   No section.  Allocations bound Agents to their assigned work. The human
+   *                owns the whole file - and this is the only way a heading an
+   *                Agent is anchored to can legitimately move.
+   *   No merge.    A human edit is interactive: it either applies to the
+   *                version they were looking at, or they are told it moved.
+   *                Silently merging text somebody is still typing is worse
+   *                than refusing it.
+   *
+   * Everything else is identical, including provenance, the contribution log
+   * and the audit event - so a line a human wrote is attributed to that human
+   * and carries no responsible Agent, which is exactly what the review loop
+   * needs in order not to route a question at nobody.
+   */
+  writeAsHuman(
+    docId: string,
+    humanId: string,
+    expectedVersion: number,
+    content: string,
+    options?: WriteOptions,
+  ): Promise<
+    | { status: "written"; version: number; content: string; contributionId: string }
+    | { status: "stale"; version: number; content: string }
+    | { status: "leased"; holder: string; expiresAt: number }
+  > {
+    return this.serialize(docId, async () => {
+      const doc = this.ensure(docId);
+      this.reapLease(doc);
+
+      if (doc.lease && doc.lease.holder !== humanId) {
+        this.emit({
+          docId,
+          actorId: humanId,
+          humanId,
+          outcome: "leased",
+          version: doc.version,
+          detail: { holder: doc.lease.holder },
+        });
+        return {
+          status: "leased" as const,
+          holder: doc.lease.holder,
+          expiresAt: doc.lease.expiresAt,
+        };
+      }
+
+      if (expectedVersion !== doc.version) {
+        return {
+          status: "stale" as const,
+          version: doc.version,
+          content: doc.content,
+        };
+      }
+
+      const previousContent = doc.content;
+      const baseVersion = doc.version;
+      const at = new Date(this.now()).toISOString();
+      const contributionId = randomUUID();
+      const previous =
+        doc.provenance.length > 0
+          ? doc.provenance
+          : seedProvenance(docId, previousContent, baseVersion, at).lines.slice();
+      const updated = reconcileProvenance({
+        previous,
+        previousContent,
+        nextContent: content,
+        agentId: null,
+        humanId,
+        contributionId,
+        version: baseVersion + 1,
+        at,
+      });
+
+      doc.content = content;
+      doc.version = baseVersion + 1;
+      doc.updatedAt = at;
+      doc.updatedBy = humanId;
+      doc.provenance = updated.lines.slice();
+      doc.contributions.push({
+        id: contributionId,
+        documentId: docId,
+        agentId: null,
+        humanId,
+        runId: options?.runId ?? null,
+        baseVersion,
+        resultingVersion: doc.version,
+        outcome: "written",
+        changedLineIds: updated.changedLineIds,
+        summary: summariseContribution(
+          options?.message ?? "edited by hand",
+          updated.changedLineIds.length,
+        ),
+        createdAt: at,
+      });
+      doc.history.push({
+        version: doc.version,
+        agentId: humanId,
+        humanId,
+        at,
+        ...(options?.message ? { message: boundedMessage(options.message) } : {}),
+        contributionId,
+      });
+
+      // Every Agent's merge base is now stale by definition. Clearing them
+      // means the next Agent write merges against what the human actually
+      // left behind rather than against text that no longer exists.
+      for (const key of [...this.bases.keys()]) {
+        if (key.endsWith("\u0000" + docId)) this.bases.delete(key);
+      }
+
+      await this.persist();
+      this.emit({
+        docId,
+        actorId: humanId,
+        humanId,
+        outcome: "written",
+        version: doc.version,
+        detail: { byHand: true },
+      });
+      return {
+        status: "written" as const,
+        version: doc.version,
+        content,
+        contributionId,
       };
     });
   }

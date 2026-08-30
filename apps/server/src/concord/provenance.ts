@@ -24,8 +24,18 @@ import { diffLines, splitLines } from "./merge.js";
 
 export interface LineProvenance {
   readonly lineId: string;
-  /** null for seeded or human-authored content that predates any Agent write. */
+  /** null for seeded content, and for lines a human last edited by hand. */
   readonly lastModifiedByAgentId: string | null;
+  /**
+   * Set when a HUMAN last changed this line directly, rather than an Agent.
+   *
+   * Kept as a second field rather than widening `lastModifiedByAgentId`,
+   * because "which Agent do I ask about this line" is a different question from
+   * "who last touched it", and the review loop only ever wants the first. A
+   * line a human wrote has no responsible Agent, and saying so explicitly is
+   * better than routing a question to whoever happened to write nearby.
+   */
+  readonly lastModifiedByHumanId?: string | null;
   readonly contributionId: string | null;
   readonly resultingDocumentVersion: number;
   readonly updatedAt: string;
@@ -42,7 +52,8 @@ export type ContributionOutcome = "written" | "merged";
 export interface AgentContribution {
   readonly id: string;
   readonly documentId: string;
-  readonly agentId: string;
+  /** null when the human edited the document directly. */
+  readonly agentId: string | null;
   readonly humanId: string | null;
   readonly runId: string | null;
   readonly baseVersion: number;
@@ -58,7 +69,10 @@ export interface ProvenanceInput {
   readonly previous: readonly LineProvenance[];
   readonly previousContent: string;
   readonly nextContent: string;
-  readonly agentId: string;
+  /** The Agent that wrote, or null when the writer is the human themself. */
+  readonly agentId: string | null;
+  /** Set only for a direct human edit. */
+  readonly humanId?: string | null;
   readonly contributionId: string;
   readonly version: number;
   readonly at: string;
@@ -121,6 +135,7 @@ export function reconcileProvenance(input: ProvenanceInput): ProvenanceUpdate {
   const attribute = (): LineProvenance => ({
     lineId: randomUUID(),
     lastModifiedByAgentId: input.agentId,
+    ...(input.humanId ? { lastModifiedByHumanId: input.humanId } : {}),
     contributionId: input.contributionId,
     resultingDocumentVersion: input.version,
     updatedAt: input.at,

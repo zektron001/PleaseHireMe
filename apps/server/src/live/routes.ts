@@ -27,7 +27,12 @@ import type { WarrantPlane } from "../warrant/index.js";
 import { isOrchestrator, requireHuman } from "../warrant/access.js";
 import type { HumanPrincipal, Subtask } from "../warrant/types.js";
 import type { ReviewService } from "../review/service.js";
-import { activityBus, type ActivityBus, type ActivityEvent } from "./activity.js";
+import {
+  activityBus,
+  type ActivityBus,
+  type ActivityEvent,
+  type WorkspaceFrame,
+} from "./activity.js";
 
 const historyQuery = z.object({
   limit: z.coerce.number().int().min(1).max(300).default(120),
@@ -110,18 +115,42 @@ export async function registerLiveRoutes(
           state: task.state,
           sharedPaths: [...task.sharedPaths],
           running: subtasks.filter((s) => s.state === "in_progress").length,
+          /**
+           * The merge gate. Offered only when every Agent has been approved by
+           * the human AND no document is contested - the same two conditions
+           * WB-7/WB-8 enforce on the server, mirrored here so the button is not
+           * shown for a decision that would be refused.
+           */
+          readyToIntegrate:
+            subtasks.length > 0 &&
+            subtasks.every((s) => s.state === "approved" || s.state === "integrated") &&
+            docs.every((doc) => doc.conflicts === 0),
+          pendingApproval: subtasks
+            .filter((s) => s.state !== "approved" && s.state !== "integrated")
+            .map((s) => s.id),
           docs,
           participants: [...new Set(subtasks.map((s) => s.ownerId))],
-          agents: subtasks.map((subtask) => ({
-            agentId: subtask.agentId,
-            subtaskId: subtask.id,
-            title: subtask.title,
-            ownerId: subtask.ownerId,
-            model: subtask.model,
-            state: subtask.state,
-            /** Only the caller's own Agents may be directed from the browser. */
-            mine: subtask.ownerId === human.id,
-          })),
+          agents: subtasks.map((subtask) => {
+            const usage = bus.usageFor([subtask.agentId])[0] ?? null;
+            return {
+              agentId: subtask.agentId,
+              subtaskId: subtask.id,
+              title: subtask.title,
+              description: subtask.description,
+              ownerId: subtask.ownerId,
+              model: subtask.model,
+              state: subtask.state,
+              /** The slice of the shared file CONCORD confines it to. */
+              section: subtask.section,
+              sectionDoc: subtask.sectionDoc,
+              /** Per-Agent cost, so a card can carry its own bill. */
+              turns: usage?.turns ?? 0,
+              inputTokens: usage?.inputTokens ?? 0,
+              outputTokens: usage?.outputTokens ?? 0,
+              /** Only the caller's own Agents may be directed from the browser. */
+              mine: subtask.ownerId === human.id,
+            };
+          }),
         };
       });
 
@@ -302,6 +331,56 @@ export async function registerLiveRoutes(
     request.raw.on("error", close);
 
     // Never resolves: Fastify must not end the response while the stream lives.
+    return reply;
+  });
+
+  /**
+   * The live screens: each Agent's own copy of the file, as it stands on disk
+   * right now. One frame per Agent, latest only - a client wants the current
+   * state of the file, not a replay of how it got there.
+   */
+  app.get("/api/live/workspaces", async (request) => {
+    const human = requireHuman(plane, request);
+    return { viewer: human.id, frames: bus.latestFrames(scopeOf(human)) };
+  });
+
+  /**
+   * Pushed workspace frames. A separate stream from the activity feed because
+   * a frame carries a whole file: interleaving them would push the one-line
+   * rows a human reads off the board within a couple of turns.
+   */
+  app.get("/api/live/workspace-stream", async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = streamQuery.parse(request.query);
+    const human = plane.whoami(query.token) ?? requireHuman(plane, request);
+
+    const permitted = (frame: WorkspaceFrame): boolean => {
+      const scope = scopeOf(human);
+      return scope === null || scope.includes(frame.agentId);
+    };
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    reply.raw.flushHeaders();
+    reply.raw.write(": connected\n\n");
+
+    const send = (frame: WorkspaceFrame): void => {
+      if (!permitted(frame)) return;
+      reply.raw.write("data: " + JSON.stringify(frame) + "\n\n");
+    };
+    for (const frame of bus.latestFrames(scopeOf(human))) send(frame);
+
+    const unsubscribe = bus.subscribeWorkspace(send);
+    const keepAlive = setInterval(() => reply.raw.write(": keep-alive\n\n"), 15_000);
+    const close = (): void => {
+      clearInterval(keepAlive);
+      unsubscribe();
+    };
+    request.raw.on("close", close);
+    request.raw.on("error", close);
     return reply;
   });
 

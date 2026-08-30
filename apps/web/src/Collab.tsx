@@ -13,65 +13,10 @@ import type {
   AccessWarrant,
   ActivityEvent,
   AgentUsage,
-  BoardPerson,
   BoardSession,
   QueueRow,
 } from "./types";
-import {
-  clockOf,
-  colorOf,
-  expiresIn,
-  humanName,
-  initialsOf,
-  shortId,
-} from "./participants";
-
-/* ------------------------------------------------------------------ people */
-
-export function PeoplePanel({
-  people,
-  viewer,
-}: {
-  people: BoardPerson[];
-  viewer: string | null;
-}): JSX.Element {
-  const active = people.filter((person) => person.agents.length > 0);
-  if (active.length === 0) {
-    return (
-      <p className="panel-empty">
-        Nobody has delegated to an Agent yet. Split a task to create warrants.
-      </p>
-    );
-  }
-  return (
-    <div className="people">
-      {active.map((person) => (
-        <div className="person" key={person.id}>
-          <div className="person-head">
-            <span className="avatar" style={{ background: colorOf(person.id) }}>
-              {initialsOf(person.id, null)}
-            </span>
-            <span className="person-name">
-              {person.displayName}
-              {person.id === viewer && <em> · you</em>}
-            </span>
-            <span className="person-role">
-              {person.agents[0]?.role ?? "No access"}
-            </span>
-          </div>
-          {person.agents.map((agent) => (
-            <div className="person-agent" key={agent.agentId}>
-              <i style={{ background: colorOf(agent.agentId) }} />
-              <span className="mono">{shortId(agent.agentId)}</span>
-              <span className="person-agent-title">{agent.title}</span>
-              <span className={"state state-" + agent.state}>{agent.state}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
+import { clockOf, colorOf, expiresIn, humanName, initialsOf, shortId } from "./participants";
 
 /* --------------------------------------------------------------- subagents */
 

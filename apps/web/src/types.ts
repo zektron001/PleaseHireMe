@@ -253,18 +253,57 @@ export interface Consultation {
   completedAt: string | null;
 }
 
+/** Enough about an Agent for a reviewer to confirm it rather than type its id. */
+export interface RoutedAgent {
+  agentId: string;
+  title: string;
+  model: string | null;
+  section: string | null;
+  state: string;
+  mine: boolean;
+}
+
 export interface AgentRouting {
   recommendedAgentId: string | null;
   candidateAgentIds: string[];
   ambiguous: boolean;
+  /** True when a human typed these lines, so no Agent is responsible. */
+  humanAuthored: boolean;
+  candidates: RoutedAgent[];
+  recommended: RoutedAgent | null;
+}
+
+/**
+ * One state of an Agent's own copy of a file, as it really was on disk.
+ * The live screens render these; they are polled from the workspace, not
+ * interpolated, so what appears on screen appeared in the file.
+ */
+export interface WorkspaceFrame {
+  agentId: string;
+  subtaskId: string | null;
+  humanId: string | null;
+  docId: string;
+  section: string | null;
+  at: string;
+  content: string;
+  changed: { startLine: number; endLine: number } | null;
+  truncated: boolean;
+}
+
+export interface SectionAllocation {
+  docId: string;
+  agentId: string;
+  heading: string;
 }
 
 export interface BlameLine {
   lineNumber: number;
   text: string;
   lineId: string | null;
-  /** null means the line predates any Agent write, not that it is unknown. */
+  /** null means no Agent wrote it - seeded, or typed by a human. */
   lastModifiedByAgentId: string | null;
+  /** Set when a human typed this line directly. */
+  lastModifiedByHumanId?: string | null;
   contributionId: string | null;
   atVersion: number | null;
   message: string | null;
@@ -319,9 +358,16 @@ export interface SessionAgent {
   agentId: string;
   subtaskId: string;
   title: string;
+  description: string;
   ownerId: string;
   model: string;
   state: string;
+  /** The slice of the shared file CONCORD confines this Agent to. */
+  section: string | null;
+  sectionDoc: string | null;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
   /** True only for Agents this human delegated to; the rest are read-only. */
   mine: boolean;
 }
@@ -334,6 +380,9 @@ export interface BoardSession {
   state: string;
   sharedPaths: string[];
   running: number;
+  /** Whether the orchestrator's final merge is available yet. */
+  readyToIntegrate: boolean;
+  pendingApproval: string[];
   docs: { id: string; version: number; conflicts: number }[];
   participants: string[];
   agents: SessionAgent[];
