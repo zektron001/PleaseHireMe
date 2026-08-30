@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import type { AgentRunner } from "./types.js";
 import type { AegisRouteDeps } from "./aegis/routes.js";
 import { registerAegisRoutes } from "./aegis/routes.js";
 import type { WarrantPlane } from "./warrant/index.js";
@@ -33,6 +34,8 @@ export async function createApp(
   service: AgentService,
   aegisDeps?: AegisRouteDeps,
   warrantPlane?: WarrantPlane,
+  /** Used only by the subtask run route. Absent in tests that never run a turn. */
+  runner?: AgentRunner,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -145,8 +148,8 @@ export async function createApp(
   }
 
   if (warrantPlane) {
-    await registerWarrantRoutes(app, warrantPlane);
-    await registerConcordRoutes(app, warrantPlane.docs);
+    await registerWarrantRoutes(app, warrantPlane, runner);
+    await registerConcordRoutes(app, warrantPlane);
   }
 
   if (config.nodeEnv === "production") {

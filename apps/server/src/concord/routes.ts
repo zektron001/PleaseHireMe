@@ -1,16 +1,23 @@
 /**
  * CONCORD route surface.
  *
- * Every operation names the Agent, and authority is resolved through the same
- * WARRANT PDP that guards workspaces - inside the store's critical section, so a
- * revocation between read and write is honoured rather than raced.
+ * Two identity rules, and they differ on purpose.
+ *
+ *   Agents  name themselves with `agentId`, and authority is resolved through
+ *           the same WARRANT PDP that guards workspaces - inside the store's
+ *           critical section, so a revocation between read and write is
+ *           honoured rather than raced. An Agent id is not a secret; the
+ *           warrant behind it is what grants anything.
+ *   Humans  never name themselves. Resolving a conflict is a human decision,
+ *           so it reads identity ONLY from the session token, exactly like the
+ *           Track B routes. There is nothing in the body to forge.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError } from "../errors.js";
-import type { WarrantPlane } from "../warrant/index.js";
-import { docResource, SharedDocStore, type AuthzCheck } from "./store.js";
+import { ORCHESTRATOR_ID, type WarrantPlane } from "../warrant/index.js";
+import { docResource, type AuthzCheck } from "./store.js";
 
 const docParams = z.object({ docId: z.string().trim().min(1).max(200) });
 const agentQuery = z.object({ agentId: z.string().trim().min(1) });
@@ -22,6 +29,16 @@ const writeBody = z.object({
 const leaseBody = z.object({
   agentId: z.string().trim().min(1),
   ttlMs: z.number().int().min(1_000).max(600_000).optional(),
+});
+const resolveBody = z.object({
+  conflictId: z.string().trim().min(1).max(200),
+  /**
+   * Which side wins, or the text of a hand-merged result. "both" is computed
+   * here rather than in the browser so the stored resolution is reproducible
+   * from the conflict record alone.
+   */
+  choice: z.enum(["ours", "theirs", "both", "content"]),
+  content: z.string().max(1_000_000).optional(),
 });
 
 /**
@@ -40,10 +57,23 @@ export function warrantAuthzCheck(plane: WarrantPlane): AuthzCheck {
   };
 }
 
+function bearerToken(request: FastifyRequest): string | undefined {
+  const header = request.headers.authorization ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : undefined;
+}
+
 export async function registerConcordRoutes(
   app: FastifyInstance,
-  store: SharedDocStore,
+  plane: WarrantPlane,
 ): Promise<void> {
+  const store = plane.docs;
+
+  const requireHuman = (request: FastifyRequest) => {
+    const human = plane.whoami(bearerToken(request));
+    if (!human) throw new HttpError(401, "Sign in to continue");
+    return human;
+  };
+
   // Scoped to the caller: an unscoped listing is a directory of every other
   // human's documents, and it hands out the lease holder ids to release.
   app.get("/api/concord/docs", async (request) => {
@@ -58,7 +88,13 @@ export async function registerConcordRoutes(
     if (result.status === "denied") {
       throw new HttpError(403, result.reason ?? "Denied");
     }
-    return result;
+    const doc = store.snapshot(docId);
+    return {
+      ...result,
+      resource: docResource(docId),
+      conflicts: doc?.conflicts ?? [],
+      present: store.presenceOf(docId, agentId),
+    };
   });
 
   app.post("/api/concord/docs/:docId", async (request, reply) => {
@@ -82,6 +118,66 @@ export async function registerConcordRoutes(
             ? 423 // Locked
             : 409; // Conflict
     return reply.code(code).send({ outcome });
+  });
+
+  /**
+   * Settling a conflict. The only identity is the session token: a human may
+   * settle their own Agent's losing edit, and the orchestrator may settle any.
+   */
+  app.post("/api/concord/docs/:docId/resolve", async (request, reply) => {
+    const { docId } = docParams.parse(request.params);
+    const body = resolveBody.parse(request.body);
+    const human = requireHuman(request);
+
+    const doc = store.snapshot(docId);
+    const pending = doc?.conflicts.find((item) => item.id === body.conflictId);
+    if (!pending) throw new HttpError(404, "Conflict not found");
+
+    const chosen =
+      body.choice === "ours"
+        ? pending.ours
+        : body.choice === "theirs"
+          ? pending.theirs
+          : body.choice === "both"
+            ? pending.theirs.replace(/\n*$/, "\n") + pending.ours
+            : (body.content ?? "");
+    if (body.choice === "content" && !body.content) {
+      throw new HttpError(400, "choice 'content' requires the merged text");
+    }
+
+    const outcome = await store.resolve(
+      docId,
+      body.conflictId,
+      human.id,
+      human.id === ORCHESTRATOR_ID,
+      chosen,
+    );
+    const code =
+      outcome.status === "resolved"
+        ? 200
+        : outcome.status === "denied"
+          ? 403
+          : outcome.status === "not-found"
+            ? 404
+            : 409;
+    return reply.code(code).send({ outcome });
+  });
+
+  /** The conflicts this human is entitled to settle. Drives the review queue. */
+  app.get("/api/concord/conflicts", async (request) => {
+    const human = requireHuman(request);
+    return {
+      viewer: human.id,
+      conflicts: store.conflictsFor(human.id, human.id === ORCHESTRATOR_ID),
+    };
+  });
+
+  app.get("/api/concord/docs/:docId/presence", async (request) => {
+    const { docId } = docParams.parse(request.params);
+    const { agentId } = agentQuery.parse(request.query);
+    const result = store.presenceOf(docId, agentId);
+    if (result.status === "denied") throw new HttpError(403, result.reason);
+    return result;
   });
 
   app.post("/api/concord/docs/:docId/lease", async (request, reply) => {
@@ -119,6 +215,7 @@ export async function registerConcordRoutes(
       version: doc.version,
       resource: docResource(doc.id),
       history: doc.history,
+      conflicts: doc.conflicts,
     };
   });
 }

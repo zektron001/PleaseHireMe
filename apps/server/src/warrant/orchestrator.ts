@@ -140,6 +140,7 @@ export class Orchestrator {
       createdBy: input.createdBy,
       createdAt: timestamp,
       subtaskIds: created.map((s) => s.id),
+      sharedPaths: [...(input.sharedPaths ?? [])],
       state: "planned",
     };
     this.tasks.set(taskId, task);

@@ -27,6 +27,7 @@ const app = await createApp(
     ? { aegis, reapAll: () => reapAllRuntimeContainers(config) }
     : undefined,
   warrantPlane,
+  runner,
 );
 
 const shutdown = async (signal: string) => {
