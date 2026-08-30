@@ -11,8 +11,9 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **209 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **240 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
+| **See it in a browser** | sidebar → **Middleware console** |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
 
 ---
@@ -167,26 +168,35 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | D9 | Shared documents: serialised writes, 3-way merge, leases | CONCORD | 29 tests |
 | D10 | Threat model against all seven brief threats | docs | [THREAT_MODEL.md](THREAT_MODEL.md) |
 | D11 | CONCORD read/release paths gated by the warrant | CONCORD | 7 tests; listing scoped, history gated, lease release authorised |
+| D12 | Documents persist; presence; conflict resolution; agent write-through | CONCORD | 31 tests; R3/R4/R5/R6 below |
+| D13 | Middleware console in the browser | web | R7; sidebar → Middleware console |
+| D14 | Concurrency outcomes in the audit chain (`C.concord`) | CONCORD | C7 closed |
 
 ### Open — claim a row
 
 | ID | Item | Area | Owner | Status | Updated | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | **R1** | **Egress broker** — makes network confinement topological, not just detective | AEGIS | `@___` | `TODO` | — | RR-2. Highest-value gap. `hardenContainerArgs` already emits the flags. |
-| **R2** | **Live container run** under the hardened profile | AEGIS | `@___` | `TODO` | — | RR-3. Turns "argv says unreachable" into "we tried it and it failed". |
-| **R3** | **Agents write through CONCORD** instead of straight to their workspace | CONCORD | `@___` | `TODO` | — | C6. Biggest CONCORD gap; currently API + demo only. |
-| **R4** | **Conflict resolution UI** — show both sides, owner picks | CONCORD | `@___` | `TODO` | — | C5. Also gives the demo something visual. |
-| **R5** | **Persist CONCORD documents** across restart | CONCORD | `@___` | `TODO` | — | C1. |
-| **R6** | **Presence** — which Agent is editing what, right now | CONCORD | `@___` | `TODO` | — | Optional. Strong "Google Docs" feel for the demo. |
-| **R7** | **Evidence panel in the Web UI** | any | `@___` | `TODO` | — | Judges must *see* something; terminal demo covers it, UI covers it better. |
-| **R8** | **Run the Ark splitter once against a live endpoint** | any | `@___` | `TODO` | — | L6. Parsing and fallback are tested; the network call is not. |
+| **R2** | **Live container run** under the hardened profile | AEGIS | `@___` | `BLOCKED` | 2026-08-30 | RR-3. **Tried it. It does not run.** Two blockers found: (1) nothing ever creates the `aegis-egress` docker network, so the container exits 125 immediately; (2) past that, Codex dies with `Read-only file system (os error 30)` - the hardened profile leaves it nowhere writable. With `AEGIS_ENABLED=false` the same turn succeeds in 9.7s. See the changelog. |
+| **R3** | **Agents write through CONCORD** instead of straight to their workspace | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C6 closed. `POST /api/warrant/subtasks/:id/run` materializes before the turn and reconciles after. Verified with a REAL Codex container turn: `written` v2, 23k tokens. Turn-granular, not per-write - the code says so. |
+| **R4** | **Conflict resolution UI** — show both sides, owner picks | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C5 closed. Both sides with the contested lines marked; keep theirs / ours / both. Only the owning human (or the orchestrator) may settle. |
+| **R5** | **Persist CONCORD documents** across restart | CONCORD | `@jemy` | `DONE` | 2026-08-30 | C1 closed. Atomic tmp+rename, mode 0600. Verified live: v8 and an open conflict survived a process restart. Leases are NOT persisted, on purpose. |
+| **R6** | **Presence** — which Agent is editing what, right now | CONCORD | `@jemy` | `DONE` | 2026-08-30 | Viewing vs editing, 15s TTL, gated by read authority. |
+| **R7** | **Evidence panel in the Web UI** | any | `@jemy` | `DONE` | 2026-08-30 | Sidebar → Middleware console. Documents, presence, conflicts and the decision stream. NOT yet reviewed by a human eye in a browser - look at it before you demo it. |
+| **R8** | **Run the Ark splitter once against a live endpoint** | any | `@jemy` | `DONE` | 2026-08-30 | L6 closed. Live plan returned model-written subtasks. NOTE: the key is an **international** endpoint - set `ARK_BASE_URL=https://ark.ap-southeast.volces.com/api/v3` or every call 401s. |
 | **R9** | **Rehearse the 3-minute demo end to end** | everyone | `@___` | `TODO` | — | Day 3. Must land under 3:00. |
 | **R10** | **Real auth for humans (OIDC)** | WARRANT | `@___` | `TODO` | — | RR-1 / L1. *Probably out of scope for 3 days — decide by Day 2.* |
 
 ### Priority if time runs short
 
-**R9 > R7 > R3 > R1 > R2.** A rehearsed demo with a visible panel beats one more control
-that nobody sees. R10 is almost certainly not worth it — mock users are explicitly allowed.
+**R9 > R2 > R1 > R10.** R3, R4, R5, R6, R7 and R8 are done. R9 (rehearse) is now
+the top item and nothing replaces it.
+
+**R2 moved up because it is not a polish item any more.** A real Agent turn only
+runs with the middleware *disabled*, so the sentence "the middleware runs in a
+real runtime path" is currently true of WARRANT and CONCORD but not of AEGIS. If
+a judge asks to see a real run with everything on, today the answer is no. Two
+concrete fixes are in the changelog; neither looks large.
 
 ---
 
@@ -195,7 +205,7 @@ that nobody sees. R10 is almost certainly not worth it — mock users are explic
 ```bash
 npm install
 
-# Everything: typecheck + 209 tests + build. This must stay green.
+# Everything: typecheck + 240 tests + build. This must stay green.
 npm run check
 
 # The Track B story in the terminal — no Ark key, no Docker needed.
@@ -247,7 +257,7 @@ Fitting, given what we are building:
 1. **One person per module at a time.** If two of you must touch `store.ts`, say so in the
    team chat first. We built a whole middleware about this problem; let us not demonstrate it
    on ourselves.
-2. **`npm run check` must be green before you push.** 209 tests. If you break one, fix it or
+2. **`npm run check` must be green before you push.** 240 tests. If you break one, fix it or
    revert — do not leave it red for someone else to find at 2am.
 3. **Every new control needs a positive *and* a negative test.** The negative one is the
    point. "It allows the good case" proves nothing about a security control.
@@ -280,6 +290,9 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
+- `2026-08-30` · `@jemy` · **AEGIS hardened profile has never run a real turn.** `aegis-egress` is created by nothing (container exits 125); past that Codex hits a read-only rootfs. Needs the network created (or `AEGIS_NETWORK_MODE` set) plus a writable tmpfs for HOME/tmp. Unhardened, the same turn works.
+- `2026-08-30` · `@jemy` · Ark key is an **international** endpoint: `ARK_BASE_URL=https://ark.ap-southeast.volces.com/api/v3`. The cn-beijing default 401s.
+- `2026-08-30` · `@jemy` · R3/R4/R5/R6/R7/R8 landed (240 tests). Agents write through CONCORD; documents persist; presence; conflict resolution; middleware console in the browser.
 - `2026-08-30` · `@jemy` · Closed two CONCORD authorization holes: `list`/`history` were ungated and `releaseLease` never checked authority (209 tests). Fixed beat 10 of the demo, which had been crashing on a 401 since trace access control landed.
 - `2026-08-30` · `@jemy` · CONCORD shared state added (29 tests); MASTER.md created; roadmap opened for claiming.
 - `2026-08-30` · `@jemy` · Threat model written against all seven brief threats; trace access control hole found and closed.

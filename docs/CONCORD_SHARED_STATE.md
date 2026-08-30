@@ -121,7 +121,7 @@ being told to look. See §6 for when this stops being the right call.
    same line -> conflict   reported, not silently resolved
 ```
 
-### Tests — 36 across two files
+### Tests — 67 across three files
 
 | Property | Test |
 | --- | --- |
@@ -137,6 +137,14 @@ being told to look. See §6 for when this stops being the right call.
 | History is gated like content | it names the Agent and human per version, so it is read authority, not public metadata |
 | Denied before missing | a caller without authority cannot probe which documents exist |
 | Release needs authority | naming the holder no longer strips someone else's lease; the lease survives |
+| Documents survive a restart | content, versions, history and open conflicts reload; a dead process's lease does not |
+| A checkout survives a restart | the per-Agent merge base is persisted, so a stale write still rebases |
+| Presence | viewing vs editing, TTL expiry, and asking who is here cannot demote an editor |
+| Conflicts are kept | both sides held; only the owning human or the orchestrator may settle |
+| Resolution rebases | a third Agent's untouched work survives the human's decision |
+| Keep both, in place | only the contested lines double, not the whole document |
+| Agents write through the store | materialize, edit in the workspace, reconcile; merge, conflict, unchanged |
+| Path escape refused | `../../etc/passwd` as a document id is not written |
 
 > The `sharedPaths` row is worth flagging. It reached the orchestrator in unit tests but
 > was silently dropped by the route's Zod schema, so every shared write was denied over
@@ -148,11 +156,11 @@ being told to look. See §6 for when this stops being the right call.
 
 | # | Limitation | Why | Next |
 | --- | --- | --- | --- |
-| **C1** | In-memory. Documents do not survive a restart. | Matches the baseline `JsonStore`. | Persist alongside the workspace, or Postgres. |
+| ~~**C1**~~ | ~~In-memory.~~ **Closed.** Atomic tmp+rename beside the baseline `JsonStore`. Leases are deliberately not persisted. | | |
 | **C2** | Single process. Serialisation is a promise chain, so it holds within one Node process only. | The starter kit is single-process. | Postgres row locks or Redis leases for multi-instance. |
 | **C3** | Merge is O(n·m) in lines. | LCS table; fine for source files. | Patience or histogram diff for large documents. |
 | **C4** | Same-line edits always conflict. | Deliberate — see §4. | Per-character CRDT *if* real-time human co-editing is ever added. |
-| **C5** | No conflict *resolution* UI. Conflicts are reported over the API, not resolved anywhere. | Out of time. | Show both sides and let the owning human choose. |
+| ~~**C5**~~ | ~~No conflict resolution UI.~~ **Closed.** Both sides are held and shown; the owning human settles it. | | |
 | **C7** | Concurrency *outcomes* (`merged`, `conflict`, `leased`) are not appended to the audit chain - only the authority decision behind them is. | The chain records authorization, and that is what Track B requires. | Append the outcome too, so "both edits survived" is chain evidence rather than an API response. |
 | **C6** | Agents do not yet write through CONCORD automatically. The store is driven by the API and the demo; the Codex runtime still writes to its own workspace. | The runtime seam is separate work. | Route agent file writes through the store. |
 
