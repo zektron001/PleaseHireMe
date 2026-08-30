@@ -1,19 +1,95 @@
+/*
+ * Two themes over one set of tokens.
+ *
+ * Light is the original paper record and stays the default. Dark is a real
+ * night mode, not an inversion: the console is an IDE-shaped surface, so it
+ * borrows an editor's habits - a near-black chrome, a slightly lighter editor
+ * ground, and semantic colours (allow / deny / contest) re-picked for contrast
+ * on dark rather than reused from light, where they would go muddy.
+ *
+ * Every console colour is a token so both themes are expressible. Nothing in
+ * console.css hardcodes a hex any more.
+ */
+
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #20211f;
-  background: #f2f1ed;
+  color-scheme: light;
+  color: var(--ink);
+  background: var(--app-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+
   --ink: #20211f;
   --muted: #777870;
   --line: #deddd6;
   --paper: #fbfaf7;
+  --app-bg: #f2f1ed;
   --purple: #6954d9;
   --purple-dark: #513db9;
   --purple-soft: #efecff;
   --green: #33906d;
   --red: #c55353;
   --shadow: 0 24px 60px rgba(39, 38, 33, 0.12);
+
+  /* Console surface */
+  --rule: #e3e1d9;
+  --rule-strong: #c9c6ba;
+  --con-dim: #7d7a70;
+  --con-faint: #b4b1a6;
+  --con-soft: #4a4a44;
+  --con-raise: #f7f5f0;
+  --con-raise-2: #fdfcf9;
+  --con-hover: #f4f2ea;
+  --con-select: #eceadf;
+  --con-allow: #2c6e52;
+  --con-deny: #a53f3f;
+  --con-contest: #8a6524;
+  --con-deny-bg: #fdf8f6;
+  --con-deny-bg-2: #fbeeec;
+  --con-deny-line: #eccfcb;
+  --con-contest-line: #f6e2b8;
+
+  /* IDE chrome */
+  --chrome: #f0eee8;
+  --chrome-2: #e8e6df;
+  --accent: #6954d9;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ink: #d6d5d0;
+  --muted: #8b8a83;
+  --line: #33322e;
+  --paper: #1c1c1a;
+  --app-bg: #141413;
+  --purple: #9b8bf4;
+  --purple-dark: #8574ef;
+  --purple-soft: #262239;
+  --green: #6bbf95;
+  --red: #e08585;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+
+  --rule: #2c2b28;
+  --rule-strong: #45443f;
+  --con-dim: #8b8a83;
+  --con-faint: #6b6a64;
+  --con-soft: #b3b2ac;
+  --con-raise: #232321;
+  --con-raise-2: #1f1f1d;
+  --con-hover: #26261f;
+  --con-select: #2f2f26;
+  --con-allow: #7bc49b;
+  --con-deny: #ef8b8b;
+  --con-contest: #d9b25f;
+  --con-deny-bg: #241a19;
+  --con-deny-bg-2: #2b1e1d;
+  --con-deny-line: #573634;
+  --con-contest-line: #574524;
+
+  --chrome: #131312;
+  --chrome-2: #1a1a18;
+  --accent: #9b8bf4;
 }
 
 * {
@@ -197,6 +273,22 @@ button {
 .create-button span {
   font-size: 19px;
   font-weight: 400;
+}
+
+.console-link {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  background: transparent;
+  border: 1px solid #3d3d38;
+  color: #d9d7cf;
+  font-size: 12px;
+}
+
+.console-link:hover {
+  border-color: #56564f;
+  color: #ffffff;
 }
 
 .sidebar-label {
@@ -1095,4 +1187,283 @@ textarea:focus {
   .form-grid {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* ------------------------------------------------- Playground, dark theme */
+/*
+ * The Playground predates the theme tokens and sets its colours directly.
+ * Rather than rewrite a working stylesheet by hand, each of those declarations
+ * is restated here for dark.
+ *
+ * The rule is not a plain inversion, which was the first attempt and was wrong:
+ * it turned the already-dark sidebar white. Instead, text that was dark becomes
+ * light; a surface that was light becomes dark; and a surface that was ALREADY
+ * dark stays dark. Saturation comes down a little either way, because a flat
+ * palette inverted raw reads as neon.
+ *
+ * Additive on purpose. The light rules are untouched, so deleting this block
+ * removes dark mode from the Playground and changes nothing else.
+ */
+
+:root[data-theme="dark"] .auth-screen {
+  background: radial-gradient(circle at top, #0c0726, #1b1a14 45%);
+}
+
+:root[data-theme="dark"] .sidebar {
+  background: #31312d;
+  color: #f0ede5;
+  border-right: 1px solid #464641;
+}
+
+:root[data-theme="dark"] .brand-mark {
+  background: linear-gradient(145deg, #150f37, #211b3e);
+}
+
+:root[data-theme="dark"] .brand span {
+  color: #babab6;
+}
+
+:root[data-theme="dark"] .button-ghost {
+  background: #1c1a14;
+  color: #b9bab5;
+}
+
+:root[data-theme="dark"] .button-ghost:hover:not(:disabled) {
+  background: #1f1d17;
+}
+
+:root[data-theme="dark"] .button-danger {
+  background: #20110f;
+  color: #cda2a2;
+}
+
+:root[data-theme="dark"] .button-danger:hover:not(:disabled) {
+  background: #231311;
+}
+
+:root[data-theme="dark"] .create-button {
+  background: #1c163b;
+}
+
+:root[data-theme="dark"] .console-link {
+  border: 1px solid #4e4e48;
+  color: #d8d7cf;
+}
+
+:root[data-theme="dark"] .console-link:hover {
+  border-color: #5a5a53;
+  color: #ebebeb;
+}
+
+:root[data-theme="dark"] .sidebar-label {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .agent-card:hover {
+  background: #3d3d38;
+}
+
+:root[data-theme="dark"] .agent-card.selected {
+  background: #45433f;
+  border-color: #585751;
+  box-shadow: inset 3px 0 #161039;
+}
+
+:root[data-theme="dark"] .agent-avatar {
+  color: #e0daf9;
+  background: #514865;
+}
+
+:root[data-theme="dark"] .agent-card-copy strong {
+  color: #edebe4;
+}
+
+:root[data-theme="dark"] .agent-card-copy span {
+  color: #babab6;
+}
+
+:root[data-theme="dark"] .mini-dot {
+  background: #595954;
+}
+
+:root[data-theme="dark"] .mini-ready, :root[data-theme="dark"] .mini-busy {
+  background: #1b382d;
+}
+
+:root[data-theme="dark"] .mini-error {
+  background: #371614;
+}
+
+:root[data-theme="dark"] .empty-sidebar {
+  color: #babab6;
+  border: 1px dashed #54544e;
+}
+
+:root[data-theme="dark"] .runtime-card {
+  border: 1px solid #4e4e48;
+  background: #373732;
+}
+
+:root[data-theme="dark"] .runtime-card > span:last-child {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .eyebrow {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .main {
+  background:
+    radial-gradient(circle at 86% -10%, rgba(105, 84, 217, 0.09), transparent 30%),
+    #1b1a14;
+}
+
+:root[data-theme="dark"] .config-banner {
+  color: #d6c49a;
+  background: #292207;
+  border: 1px solid #2f2811;
+}
+
+:root[data-theme="dark"] .config-banner > span {
+  background: #776236;
+}
+
+:root[data-theme="dark"] .error-banner {
+  color: #cda2a2;
+  background: #220f0c;
+  border: 1px solid #281311;
+}
+
+:root[data-theme="dark"] .status {
+  background: #1d1c18;
+  color: #b9bab5;
+}
+
+:root[data-theme="dark"] .status-ready {
+  color: #9ed1bc;
+  background: #11211b;
+}
+
+:root[data-theme="dark"] .status-busy {
+  color: #a89fd0;
+  background: #100b24;
+}
+
+:root[data-theme="dark"] .status-error {
+  color: #cea2a2;
+  background: #23110f;
+}
+
+:root[data-theme="dark"] .settings-title button, :root[data-theme="dark"] .modal-heading button {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] label {
+  color: #babab5;
+}
+
+:root[data-theme="dark"] input, :root[data-theme="dark"] textarea {
+  border: 1px solid #201f1a;
+}
+
+:root[data-theme="dark"] input:focus, :root[data-theme="dark"] textarea:focus {
+  border-color: #181236;
+}
+
+:root[data-theme="dark"] .panel-footer code {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .playground-topbar {
+  border-bottom: 1px solid #1e1c17;
+}
+
+:root[data-theme="dark"] .session-info {
+  color: #b9bab5;
+  border: 1px solid #1f1e18;
+}
+
+:root[data-theme="dark"] .pulse {
+  background: #1f3a2e;
+}
+
+:root[data-theme="dark"] .messages {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.52)),
+    radial-gradient(circle at 20% 0, #100d20, transparent 38%);
+}
+
+:root[data-theme="dark"] .welcome-orbit {
+  border: 1px solid #130f25;
+}
+
+:root[data-theme="dark"] .welcome-orbit::before, :root[data-theme="dark"] .welcome-orbit::after {
+  border: 1px solid #120f22;
+}
+
+:root[data-theme="dark"] .welcome-orbit::after {
+  background: #1a1339;
+  box-shadow: -52px 35px 0 #150f2d;
+}
+
+:root[data-theme="dark"] .welcome-orbit div {
+  background: linear-gradient(145deg, #171037, #1f193c);
+}
+
+:root[data-theme="dark"] .welcome > p {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .prompt-grid button {
+  border: 1px solid #1f1e18;
+  color: #b9bab5;
+}
+
+:root[data-theme="dark"] .prompt-grid button:hover {
+  border-color: #17122f;
+}
+
+:root[data-theme="dark"] .message-meta span {
+  color: #babab6;
+}
+
+:root[data-theme="dark"] .message-body {
+  color: #b9bab6;
+}
+
+:root[data-theme="dark"] .message-user .message-body {
+  background: #0f0b24;
+  color: #aca5ca;
+  border: 1px solid #120d26;
+}
+
+:root[data-theme="dark"] .message-assistant .message-body {
+  border-left: 2px solid #191336;
+}
+
+:root[data-theme="dark"] .thinking-row {
+  color: #b9b9b6;
+}
+
+:root[data-theme="dark"] .run-error {
+  background: #210f0d;
+  color: #cba4a4;
+}
+
+:root[data-theme="dark"] .composer {
+  border-top: 1px solid #1f1d18;
+  background: #1c1911;
+}
+
+:root[data-theme="dark"] .composer-footer > span {
+  color: #babab5;
+}
+
+:root[data-theme="dark"] .send-button:disabled {
+  background: #21201d;
+}
+
+:root[data-theme="dark"] .no-agent-art {
+  background: linear-gradient(145deg, #160f36, #433974);
 }

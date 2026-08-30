@@ -14,7 +14,9 @@ export type GateId =
   | "G3.interception"
   | "G4.postflight"
   /** Track B (WARRANT) authorization decisions share this audit chain. */
-  | "B.authz";
+  | "B.authz"
+  /** CONCORD concurrency outcomes: written, merged, conflict, resolved. */
+  | "C.concord";
 
 export type Severity = "info" | "warn" | "critical";
 

@@ -19,7 +19,8 @@ import { createSplitter } from "./splitter.js";
 import { tiersFrom } from "./model-policy.js";
 import { SubtaskWorkspaceManager } from "./workspaces.js";
 import { WarrantBinder } from "./binding.js";
-import { SharedDocStore } from "../concord/store.js";
+import { docResource, SharedDocStore, type ConcordEvent } from "../concord/store.js";
+import { WorkspaceReconciler } from "../concord/reconcile.js";
 import { warrantAuthzCheck } from "../concord/routes.js";
 import type { AuthzDecision, HumanPrincipal, WarrantAction } from "./types.js";
 
@@ -37,18 +38,40 @@ export interface CheckInput {
 }
 
 export class WarrantPlane {
+  /** CONCORD - shared concurrent documents, guarded by this same PDP. */
+  readonly docs: SharedDocStore;
+  /** The runtime seam: shared files in and out of a workspace around each turn. */
+  readonly reconciler: WorkspaceReconciler;
+
   private constructor(
     readonly registry: Registry,
     readonly orchestrator: Orchestrator,
     readonly audit: AuditLog,
     readonly workspaces: SubtaskWorkspaceManager,
     readonly binder: WarrantBinder,
-  ) {}
+    documentPath?: string,
+  ) {
+    this.docs = new SharedDocStore(warrantAuthzCheck(this), Date.now, {
+      persistPath: documentPath,
+      // Concurrency outcomes join the authorization decisions already in the
+      // chain, so "both edits survived" is evidence rather than an assertion.
+      onEvent: (event) => this.recordConcord(event),
+    });
+    this.reconciler = new WorkspaceReconciler(this.docs);
+  }
 
-  /** CONCORD - shared concurrent documents, guarded by this same PDP. */
-  readonly docs: SharedDocStore = new SharedDocStore(warrantAuthzCheck(this));
-
-  static async bootstrap(config: AppConfig): Promise<WarrantPlane> {
+  /**
+   * `sharedAudit` is AEGIS's chain. The module header claims authorization and
+   * safety records share one verifiable chain, and until now they did not: each
+   * plane built its own AuditLog over its own file, so an egress crossing and
+   * the authorization behind it landed in different chains and no single view
+   * could show both. Passing AEGIS's log in makes the claim true. Tests that
+   * build a plane on its own still get their own chain.
+   */
+  static async bootstrap(
+    config: AppConfig,
+    sharedAudit?: AuditLog,
+  ): Promise<WarrantPlane> {
     const registry = new Registry();
     const workspaces = new SubtaskWorkspaceManager(
       path.join(config.workspaceRoot, "subtasks"),
@@ -62,7 +85,9 @@ export class WarrantPlane {
       Date.now,
       workspaces,
     );
-    const audit = new AuditLog(
+    const audit =
+      sharedAudit ??
+      new AuditLog(
       path.join(config.dataDirectory, "warrant-audit.jsonl"),
       new Redactor([config.arkApiKey, config.authToken]),
       config.aegisCaptureLevel,
@@ -71,20 +96,23 @@ export class WarrantPlane {
         maxAgeMs: config.aegisRetentionMaxAgeMs,
       },
     );
-    await audit.initialize();
+    if (!sharedAudit) await audit.initialize();
 
     // Two mock humans, as Track B requires. Section 8 blesses mock users.
     registry.addHuman("alice", "Alice Chen");
     registry.addHuman("bob", "Bob Okafor");
     registry.addHuman("orchestrator", "Task Orchestrator");
 
-    return new WarrantPlane(
+    const plane = new WarrantPlane(
       registry,
       orchestrator,
       audit,
       workspaces,
       new WarrantBinder(registry, orchestrator, workspaces),
+      path.join(config.dataDirectory, "concord-docs.json"),
     );
+    await plane.docs.initialize();
+    return plane;
   }
 
   /** The only way to learn who is calling. See registry.resolveSession. */
@@ -168,6 +196,40 @@ export class WarrantPlane {
         resource: decision.resource,
         decision: decision.decision,
         warrant: decision.warrantId ?? "-",
+      },
+    });
+  }
+
+  /**
+   * A CONCORD outcome in the same hash chain as every authorization decision.
+   *
+   * The gate differs (`C.concord`, not `B.authz`) because it answers a
+   * different question: not whether the Agent was allowed to write, but what
+   * happened when it did while someone else was writing too.
+   */
+  recordConcord(event: ConcordEvent): void {
+    const denied = event.outcome === "denied";
+    const contested = event.outcome === "conflict" || event.outcome === "leased";
+    this.audit.append({
+      runId: "concord",
+      agentId: event.actorId,
+      gate: "C.concord",
+      verdict: {
+        decision: denied ? "Deny" : "Allow",
+        ruleId: "CD-" + event.outcome,
+        reason: String(event.detail["reason"] ?? "Shared document " + event.outcome),
+        gate: "C.concord",
+        policyVersion: POLICY_VERSION,
+        policyHash: POLICY_VERSION,
+        severity: denied ? "warn" : contested ? "warn" : "info",
+      },
+      evidence: {
+        human: event.humanId ?? "anonymous",
+        agent: event.actorId,
+        action: "document." + event.outcome,
+        resource: docResource(event.docId),
+        decision: denied ? "Deny" : "Allow",
+        version: event.version,
       },
     });
   }

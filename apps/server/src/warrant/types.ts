@@ -97,6 +97,13 @@ export interface Task {
   readonly createdBy: string;
   readonly createdAt: string;
   readonly subtaskIds: readonly string[];
+  /**
+   * Files granted to EVERY subtask, deliberately outside the partition. Held on
+   * the task because they are the set CONCORD reconciles after each turn - the
+   * warrants already carry them, but a warrant cannot say which of its resources
+   * were shared rather than owned.
+   */
+  readonly sharedPaths: readonly string[];
   state: "planned" | "running" | "integrated";
 }
 

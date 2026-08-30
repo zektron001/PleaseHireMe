@@ -6,7 +6,7 @@
  * with no container engine present:
  *
  *   KS-1  --network bridge      ->  --network none
- *   KS-3  codex-home mount      ->  readonly
+ *   KS-3  codex-home config     ->  readonly (the directory stays writable)
  *   KS-4  + --read-only rootfs, --tmpfs /tmp (noexec,nosuid), seccomp profile
  *   KS-7  - --env ARK_API_KEY   ->  broker endpoint + single-run token
  *
@@ -100,20 +100,53 @@ export function hardenContainerArgs(
   args = dropFlagWithValue(args, "--network");
 
   // KS-7 - the raw Ark key never enters the container environment.
+  //
+  // It is REPLACED rather than removed. Deleting it left Codex with no
+  // credential at all and no broker to get one from, so it died on
+  // "Missing environment variable: ARK_API_KEY" - a hardened profile that could
+  // not run. The container now holds a per-run capability in the same variable:
+  // the client puts whatever ARK_API_KEY contains into the Authorization
+  // header, the broker recognises the capability there, and attaches the real
+  // key on the far side. What sits inside the namespace is a token that buys
+  // one run's calls to one endpoint and dies with the run.
   args = dropFlagWithValue(args, "--env", "ARK_API_KEY");
 
-  // KS-3 - re-mount the Codex home read-only.
-  args = args.map((arg) =>
-    arg.startsWith("type=bind,src=" + options.codexHome + ",dst=") &&
-    !arg.includes(",readonly")
-      ? arg + ",readonly"
-      : arg,
-  );
+  // KS-3 - pin the Codex CONFIGURATION read-only, not the whole home.
+  //
+  // The blanket read-only remount was wrong, and provably so: Codex writes its
+  // sessions, sqlite state, shell snapshots and skills into CODEX_HOME, so a
+  // read-only home means no turn can run at all. A control that makes the thing
+  // it guards unusable is not a control; it is an outage that has never been
+  // tested. The asset is `config.toml` - it names the model provider, the base
+  // URL and the key's env var, so an Agent that can rewrite it can repoint its
+  // own model at an endpoint of its choosing and exfiltrate every prompt. That
+  // file is pinned; the session state around it stays writable.
+  const configMount =
+    "type=bind,src=" +
+    options.codexHome +
+    "/config.toml,dst=/codex-home/config.toml,readonly";
+  if (!args.includes(configMount)) {
+    const homeMountIndex = args.findIndex((arg) =>
+      arg.startsWith("type=bind,src=" + options.codexHome + ",dst="),
+    );
+    if (homeMountIndex !== -1) {
+      // Must come AFTER the directory mount: a file bind-mount lands on top of
+      // the directory it sits in, and the order of --mount flags is the order
+      // the engine applies them.
+      args.splice(homeMountIndex + 1, 0, "--mount", configMount);
+    }
+  }
 
   const insertAt = imageIndex(args);
   const injected: string[] = [
     "--network",
     options.networkMode,
+    // The broker runs on the host. Without this the container cannot resolve
+    // host.docker.internal on Docker Engine, only on Docker Desktop.
+    "--add-host",
+    "host.docker.internal:host-gateway",
+    "--env",
+    "ARK_API_KEY=" + options.runToken,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,noexec,nosuid,size=" + (options.tmpfsSize ?? "64m"),
@@ -140,6 +173,13 @@ export function profileEvidence(args: readonly string[]): Record<string, string 
     rootfs: args.includes("--read-only") ? "read-only" : "writable",
     seccomp: args.some((a) => a.startsWith("seccomp=")) ? "aegis-strict-v1" : "engine-default",
     tmpfsNoexec: args.some((a) => a.includes("/tmp:") && a.includes("noexec")),
+    codexConfigPinned: args.some(
+      (a) => a.includes("dst=/codex-home/config.toml") && a.includes("readonly"),
+    ),
+    // True only when the value in the namespace is a capability, not the key.
+    keyReplacedByCapability:
+      !args.includes("ARK_API_KEY") &&
+      args.some((a) => a.startsWith("ARK_API_KEY=")),
     arkKeyInEnv: args.includes("ARK_API_KEY"),
   };
 }

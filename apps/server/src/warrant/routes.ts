@@ -12,10 +12,16 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { AgentRunner } from "../types.js";
 import { z } from "zod";
 import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "./index.js";
 import { workspaceResource } from "./resources.js";
+import {
+  parseCheckpoint,
+  withCheckpointInstruction,
+} from "../concord/checkpoint.js";
+import { WarrantBindingError } from "./binding.js";
 
 const loginBody = z.object({ handle: z.string().trim().min(1).max(40) });
 
@@ -36,6 +42,10 @@ const actBody = z.object({
 
 const subtaskParams = z.object({ subtaskId: z.string().trim().min(1) });
 const taskParams = z.object({ taskId: z.string().trim().min(1) });
+const runBody = z.object({
+  prompt: z.string().trim().min(1).max(10_000),
+});
+
 const revokeBody = z.object({
   warrantId: z.string().trim().min(1),
   reason: z.string().trim().max(200).default("Revoked by owner"),
@@ -50,6 +60,8 @@ function bearerToken(request: FastifyRequest): string | undefined {
 export async function registerWarrantRoutes(
   app: FastifyInstance,
   plane: WarrantPlane,
+  /** Absent in unit tests that never execute a turn. */
+  runner?: AgentRunner,
 ): Promise<void> {
   const requireHuman = (request: FastifyRequest) => {
     const human = plane.whoami(bearerToken(request));
@@ -133,6 +145,105 @@ export async function registerWarrantRoutes(
       throw new HttpError(403, decision.reason);
     }
     return { subtask: plane.orchestrator.setState(subtaskId, "submitted"), decision };
+  });
+
+  /**
+   * Execute one turn for a subtask Agent, with CONCORD around it.
+   *
+   * This is where the three planes meet on one request:
+   *
+   *   WARRANT  binds the Agent to exactly one workspace, or refuses to produce a
+   *            runner request at all - an Agent with no live warrant gets no
+   *            container, not a container it is then denied inside.
+   *   CONCORD  materializes the shared documents at their committed version
+   *            before the turn, and submits whatever changed back through the
+   *            store afterwards. The Agent never writes shared state directly.
+   *   AEGIS    is already inside `runner`, which is the guarded runner when the
+   *            middleware is enabled.
+   */
+  app.post("/api/warrant/subtasks/:subtaskId/run", async (request, reply) => {
+    const human = requireHuman(request);
+    const { subtaskId } = subtaskParams.parse(request.params);
+    const body = runBody.parse(request.body);
+
+    const subtask = plane.orchestrator.subtask(subtaskId);
+    if (!subtask) throw new HttpError(404, "Subtask not found");
+
+    // Spending an Agent's authority is the owner's call. Identity is the session
+    // token, so this cannot be bypassed by naming a different human.
+    const owned = subtask.ownerId === human.id;
+    plane.record({
+      humanId: human.id,
+      agentId: subtask.agentId,
+      action: "workspace.write",
+      resource: workspaceResource(subtaskId),
+      decision: owned ? "Allow" : "Deny",
+      ruleId: owned ? "WB-0.owner-runs-agent" : "WB-6.cross-owner",
+      reason: owned
+        ? "The accountable human started their own Agent"
+        : "Only " + subtask.ownerId + " may run this Agent",
+      warrantId: subtask.warrantId,
+    });
+    if (!owned) throw new HttpError(403, "Only " + subtask.ownerId + " may run this Agent");
+    if (!runner) throw new HttpError(503, "No Agent runtime is configured");
+
+    let bound;
+    try {
+      bound = plane.binder.bind(
+        subtask.agentId,
+        withCheckpointInstruction(body.prompt),
+      );
+    } catch (error) {
+      if (error instanceof WarrantBindingError) {
+        plane.record(error.decision);
+        throw new HttpError(403, error.message);
+      }
+      throw error;
+    }
+
+    const shared = plane.orchestrator.task(subtask.taskId)?.sharedPaths ?? [];
+    const workspacePath = bound.request.workspacePath;
+
+    const materialized = await plane.reconciler.materialize(
+      workspacePath,
+      subtask.agentId,
+      shared,
+    );
+
+    plane.orchestrator.setState(subtaskId, "in_progress");
+    try {
+      const result = await runner.run(bound.request);
+      const checkpoint = parseCheckpoint(result.output);
+      const reconciled = await plane.reconciler.reconcile(
+        workspacePath,
+        subtask.agentId,
+        shared,
+        { message: checkpoint, runId: subtaskId },
+      );
+      return reply.code(200).send({
+        subtaskId,
+        agentId: subtask.agentId,
+        model: bound.model,
+        output: result.output,
+        usage: result.usage,
+        materialized,
+        reconciled,
+        checkpoint,
+      });
+    } catch (error) {
+      plane.orchestrator.setState(subtaskId, "assigned");
+      // A failed turn may still have left edits on disk. Reconciling anyway is
+      // the safe direction: the alternative is silently dropping work that the
+      // Agent did before it fell over.
+      const reconciled = await plane.reconciler.reconcile(
+        workspacePath,
+        subtask.agentId,
+        shared,
+        { message: null, runId: subtaskId },
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(502).send({ subtaskId, error: message, materialized, reconciled });
+    }
   });
 
   // -------------------------------------------------- owner approval

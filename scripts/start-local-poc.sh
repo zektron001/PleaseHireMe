@@ -63,6 +63,15 @@ detect_engine() {
   return 1
 }
 
+# The key lives in .env - the same file docker-compose reads - so load it here
+# rather than making every teammate remember to export it by hand.
+if [[ -f "$repo_dir/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$repo_dir/.env"
+  set +a
+fi
+
 if [[ -z "${ARK_API_KEY:-}" || -z "${ARK_MODEL:-}" ]]; then
   log "ARK_API_KEY and ARK_MODEL are required."
   log "Example: ARK_API_KEY=key ARK_MODEL=ep-id ./scripts/start-local-poc.sh"

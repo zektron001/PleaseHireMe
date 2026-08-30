@@ -1,3 +1,4 @@
+import path from "node:path";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -7,11 +8,13 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import type { AgentRunner } from "./types.js";
 import type { AegisRouteDeps } from "./aegis/routes.js";
 import { registerAegisRoutes } from "./aegis/routes.js";
 import type { WarrantPlane } from "./warrant/index.js";
 import { registerWarrantRoutes } from "./warrant/routes.js";
 import { registerConcordRoutes } from "./concord/routes.js";
+import { registerReviewRoutes } from "./review/routes.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -33,6 +36,8 @@ export async function createApp(
   service: AgentService,
   aegisDeps?: AegisRouteDeps,
   warrantPlane?: WarrantPlane,
+  /** Used only by the subtask run route. Absent in tests that never run a turn. */
+  runner?: AgentRunner,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -59,7 +64,18 @@ export async function createApp(
       // authenticate it themselves against the Registry. The shared demo token
       // is not identity (it never was), so gating these on it would only break
       // the stronger check without adding one.
-      request.url.startsWith("/api/warrant/")
+      request.url.startsWith("/api/warrant/") ||
+      // CONCORD is the same argument. Every route here resolves either a
+      // warrant-bound agentId through the PDP or a per-human session token;
+      // one Authorization header cannot carry the shared token AND the
+      // identity that actually decides the request.
+      request.url.startsWith("/api/concord/") ||
+      // The review routes are the same argument again: each resolves a
+      // per-human session token through the Registry, or a warrant-bound
+      // agentId through the PDP. Gating them on the shared demo token would
+      // reject the stronger identity, because one Authorization header cannot
+      // carry both.
+      request.url.startsWith("/api/review/")
     ) {
       return;
     }
@@ -145,8 +161,14 @@ export async function createApp(
   }
 
   if (warrantPlane) {
-    await registerWarrantRoutes(app, warrantPlane);
-    await registerConcordRoutes(app, warrantPlane.docs);
+    await registerWarrantRoutes(app, warrantPlane, runner);
+    await registerConcordRoutes(app, warrantPlane);
+    await registerReviewRoutes(
+      app,
+      warrantPlane,
+      runner ?? null,
+      path.join(config.dataDirectory, "review-state.json"),
+    );
   }
 
   if (config.nodeEnv === "production") {

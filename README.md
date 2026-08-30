@@ -22,7 +22,7 @@
 >
 > ```bash
 > npm run demo:warrant   # the whole Track B story in your terminal, no Ark key needed
-> npm run check          # typecheck + 202 tests + build
+> npm run check          # typecheck + 255 tests + build
 > ```
 >
 > **Team reference + roadmap:** [`docs/MASTER.md`](docs/MASTER.md) — start here.
@@ -89,7 +89,29 @@ Volcengine ECS.
 - Docker, Colima, or Podman
 - A Volcengine Ark API key and endpoint that supports the Responses API
 
+> [!IMPORTANT]
+> `ARK_BASE_URL` must match the region your key was issued in. A key from the
+> international console answers on `https://ark.ap-southeast.volces.com/api/v3`,
+> and against the `cn-beijing` default every call returns
+> `401 The API key doesn't exist` - which looks exactly like a bad key.
+
 Codex CLI is included in the Runtime image and is not required on the host.
+
+## The middleware console
+
+The selected track is **B - The Bouncer**. Everything it decides is visible in
+the browser: open the Playground and click **Middleware console** in the sidebar.
+
+| Column | Answers |
+| --- | --- |
+| Shared documents | what shared state exists, and which Agent is on it right now |
+| Document | what it says, who wrote each version, and any open conflict |
+| Decision stream | the hash-chained decisions behind all of it, five-tuple per row |
+
+Sign in as one of the mock humans, split a task with a shared path, and run an
+Agent. Two Agents editing the same file resolve by merge; a genuine same-line
+disagreement is held open until the human who owns the losing Agent settles it.
+Running an Agent you do not own is refused by the backend, not hidden by the UI.
 
 ## Local browser SOP
 
@@ -252,7 +274,7 @@ cp deploy/volcengine/terraform.tfvars.example \
 | --- | --- | --- |
 | `ARK_API_KEY` | Required | Ark model API key. |
 | `ARK_MODEL` | Required | Responses-capable endpoint or model ID. |
-| `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. |
+| `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. **Must match your key's region** - international keys need `https://ark.ap-southeast.volces.com/api/v3`. |
 | `APP_AUTH_TOKEN` | Empty on loopback | Shared demo token; use 24+ random characters remotely. |
 | `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
 | `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |

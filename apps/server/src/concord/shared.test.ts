@@ -13,9 +13,12 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 
+import { readFile, writeFile } from "node:fs/promises";
+
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import type { AgentService } from "../agent-service.js";
+import type { AgentRunner, RunnerRequest } from "../types.js";
 import { WarrantPlane } from "../warrant/index.js";
 
 const service = {
@@ -28,6 +31,21 @@ const SHARED = "docs/CHANGELOG.md";
 let dir = "";
 let app: FastifyInstance;
 let plane: WarrantPlane;
+
+/**
+ * Stands in for Codex: it does whatever the test says a turn did, by editing
+ * files in the workspace it was given. Everything around it - the warrant bind,
+ * the materialize, the reconcile - is the real code path.
+ */
+let turn: (request: RunnerRequest) => Promise<void> = async () => {};
+const runner: AgentRunner = {
+  run: async (request) => {
+    await turn(request);
+    return { output: "turn complete", threadId: null, usage: null };
+  },
+  cancel: async () => true,
+  isAvailable: async () => true,
+};
 
 interface Planned {
   id: string;
@@ -47,13 +65,19 @@ beforeEach(async () => {
     AEGIS_ENABLED: "false",
   } as NodeJS.ProcessEnv);
   plane = await WarrantPlane.bootstrap(config);
-  app = await createApp(config, service, undefined, plane);
+  turn = async () => {};
+  app = await createApp(config, service, undefined, plane, runner);
 });
 
 afterEach(async () => {
   await app.close();
   await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
 });
+
+const login = async (handle: string): Promise<string> =>
+    (
+      await app.inject({ method: "POST", url: "/api/warrant/session", payload: { handle } })
+    ).json().token as string;
 
 /** Plans a task whose subtasks all share one document. */
 async function planShared(): Promise<Planned[]> {
@@ -156,7 +180,11 @@ describe("a shared document both Agents may write", () => {
     const history = (
       await app.inject({
         method: "GET",
-        url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/history",
+        url:
+          "/api/concord/docs/" +
+          encodeURIComponent(SHARED) +
+          "/history?agentId=" +
+          alice.agentId,
       })
     ).json().history;
 
@@ -181,6 +209,38 @@ describe("WARRANT still governs CONCORD", () => {
     await planShared();
     const res = await read("agent_nobody");
     expect(res.statusCode).toBe(403);
+  });
+
+  it("denies the history of a document the Agent may not read", async () => {
+    await planShared();
+
+    // History carries the agent and human behind every version. Gating the
+    // content but not its history would leak the cross-owner activity anyway.
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/concord/docs/" + encodeURIComponent(SHARED) + "/history?agentId=agent_nobody",
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("lists only the documents the calling Agent may read", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+
+    await write(alice.agentId, 0, "one");
+
+    const mine = await app.inject({
+      method: "GET",
+      url: "/api/concord/docs?agentId=" + alice.agentId,
+    });
+    expect(mine.json().docs.map((d: { id: string }) => d.id)).toContain(SHARED);
+
+    const theirs = await app.inject({
+      method: "GET",
+      url: "/api/concord/docs?agentId=agent_nobody",
+    });
+    expect(theirs.json().docs).toEqual([]);
   });
 
   it("honours a revocation that lands between read and write", async () => {
@@ -227,6 +287,29 @@ describe("leases over HTTP", () => {
     });
     expect(released.json().released).toBe(true);
     expect((await write(bob.agentId, 0, "bob now")).statusCode).toBe(200);
+  });
+
+  it("refuses to release a lease for an Agent with no warrant", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const bob = subtasks[1] as Planned;
+
+    await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease",
+      payload: { agentId: alice.agentId, ttlMs: 60_000 },
+    });
+
+    // A holder id is not a secret. Without authority on the release path,
+    // naming the holder would be enough to strip the lease.
+    const stripped = await app.inject({
+      method: "DELETE",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/lease?agentId=agent_nobody",
+    });
+    expect(stripped.statusCode).toBe(403);
+
+    // The lease survived, so Bob is still locked out.
+    expect((await write(bob.agentId, 0, "bob tries again")).statusCode).toBe(423);
   });
 });
 
@@ -302,5 +385,240 @@ describe("sharedPaths survives the HTTP boundary", () => {
     // And a path that was NOT shared is still refused.
     const first = subtasks[0] as Planned;
     expect((await read(first.agentId, "docs/NOT_SHARED.md")).statusCode).toBe(403);
+  });
+});
+
+describe("presence over HTTP", () => {
+  it("names the Agents on a document and what each is doing", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const bob = subtasks[1] as Planned;
+
+    await read(bob.agentId);
+    await write(alice.agentId, 0, "alice was here");
+
+    const present = (
+      await app.inject({
+        method: "GET",
+        url:
+          "/api/concord/docs/" +
+          encodeURIComponent(SHARED) +
+          "/presence?agentId=" +
+          alice.agentId,
+      })
+    ).json().present as { agentId: string; activity: string }[];
+
+    const byAgent = Object.fromEntries(present.map((p) => [p.agentId, p.activity]));
+    expect(byAgent[alice.agentId]).toBe("editing");
+    expect(byAgent[bob.agentId]).toBe("viewing");
+  });
+
+  it("refuses presence to an Agent with no warrant", async () => {
+    await planShared();
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/presence?agentId=agent_nobody",
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe("resolving a conflict is a human decision", () => {
+  /** Drives both Agents into a same-line clash and returns the open conflict. */
+  const clash = async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const bob = subtasks[1] as Planned;
+
+    await write(alice.agentId, 0, "- TBD\n");
+    await read(alice.agentId);
+    await read(bob.agentId);
+    await write(alice.agentId, 1, "- rate limiter\n");
+    const losing = await write(bob.agentId, 1, "- config validation\n");
+    expect(losing.statusCode).toBe(409);
+    return {
+      alice,
+      bob,
+      conflictId: losing.json().outcome.conflictId as string,
+    };
+  };
+
+  it("lists the conflict for the human who owns the losing Agent", async () => {
+    const { bob, conflictId } = await clash();
+    const token = await login("bob");
+
+    const mine = (
+      await app.inject({
+        method: "GET",
+        url: "/api/concord/conflicts",
+        headers: { authorization: "Bearer " + token },
+      })
+    ).json();
+    expect(mine.conflicts.map((c: { id: string }) => c.id)).toEqual([conflictId]);
+    expect(mine.conflicts[0].agentId).toBe(bob.agentId);
+  });
+
+  it("commits the side the owning human picks", async () => {
+    const { bob, conflictId } = await clash();
+    const token = await login("bob");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/resolve",
+      headers: { authorization: "Bearer " + token },
+      payload: { conflictId, choice: "ours" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((await read(bob.agentId)).json().content).toBe("- config validation\n");
+  });
+
+  it("keeps both sides when the human asks for both", async () => {
+    const { bob, conflictId } = await clash();
+    const token = await login("bob");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/resolve",
+      headers: { authorization: "Bearer " + token },
+      payload: { conflictId, choice: "both" },
+    });
+    const content = (await read(bob.agentId)).json().content as string;
+    expect(content).toContain("rate limiter");
+    expect(content).toContain("config validation");
+  });
+
+  it("refuses a human settling a conflict that is not theirs", async () => {
+    const { conflictId } = await clash();
+    const token = await login("alice");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/resolve",
+      headers: { authorization: "Bearer " + token },
+      payload: { conflictId, choice: "ours" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("refuses an anonymous caller outright", async () => {
+    const { conflictId } = await clash();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/concord/docs/" + encodeURIComponent(SHARED) + "/resolve",
+      payload: { conflictId, choice: "ours" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("an Agent turn writes through CONCORD", () => {
+  const runSubtask = (subtaskId: string, token: string, prompt = "do the work") =>
+    app.inject({
+      method: "POST",
+      url: "/api/warrant/subtasks/" + subtaskId + "/run",
+      headers: { authorization: "Bearer " + token },
+      payload: { prompt },
+    });
+
+  it("materializes the committed version, then commits what the turn changed", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    await write(alice.agentId, 0, "# Changelog\n");
+
+    // The "Agent" appends a line to the shared file, as Codex would.
+    turn = async (request) => {
+      const file = path.join(request.workspacePath, SHARED);
+      const before = await readFile(file, "utf8");
+      expect(before).toBe("# Changelog\n");
+      await writeFile(file, before + "- rate limiter\n", "utf8");
+    };
+
+    const res = await runSubtask(alice.id, await login("alice"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().reconciled[0]).toMatchObject({ docId: SHARED, status: "written" });
+    expect((await read(alice.agentId)).json().content).toBe("# Changelog\n- rate limiter\n");
+  });
+
+  it("merges two Agents whose turns overlapped on the same shared file", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    const bob = subtasks[1] as Planned;
+    await write(alice.agentId, 0, "# Changelog\n- TBD\n");
+
+    // Both turns must be in flight at once for this to be a race at all. Run
+    // them one after the other and the second simply materializes the first's
+    // committed version - correct, but it proves nothing about concurrency.
+    let arrived = 0;
+    let release = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    turn = async (request) => {
+      const file = path.join(request.workspacePath, SHARED);
+      const before = await readFile(file, "utf8");
+      if (++arrived === 2) release();
+      await bothStarted;
+
+      const mine = request.agentId === alice.agentId;
+      await writeFile(
+        file,
+        mine
+          ? before.replace("- TBD", "- rate limiter\n- TBD")
+          : before.replace("- TBD", "- TBD\n- config validation"),
+        "utf8",
+      );
+    };
+
+    const [first, second] = await Promise.all([
+      runSubtask(alice.id, await login("alice")),
+      runSubtask(bob.id, await login("bob")),
+    ]);
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    // Whichever commits first is `written` and the other rebases onto it. Which
+    // one wins the race is not the point; that neither is lost is.
+    const outcomes = [first, second].map((r) => r.json().reconciled[0].status).sort();
+    expect(outcomes).toEqual(["merged", "written"]);
+
+    const content = (await read(alice.agentId)).json().content as string;
+    expect(content).toContain("rate limiter");
+    expect(content).toContain("config validation");
+  });
+
+  it("refuses to run an Agent for a human who does not own it", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+
+    let ran = false;
+    turn = async () => {
+      ran = true;
+    };
+
+    const res = await runSubtask(alice.id, await login("bob"));
+    expect(res.statusCode).toBe(403);
+    // The denial is upstream of the runtime: no container, not a denied one.
+    expect(ran).toBe(false);
+  });
+
+  it("still commits the edits a failed turn had already made", async () => {
+    const subtasks = await planShared();
+    const alice = subtasks[0] as Planned;
+    await write(alice.agentId, 0, "# Changelog\n");
+
+    turn = async (request) => {
+      await writeFile(
+        path.join(request.workspacePath, SHARED),
+        "# Changelog\n- half-finished\n",
+        "utf8",
+      );
+      throw new Error("runtime exploded");
+    };
+
+    const res = await runSubtask(alice.id, await login("alice"));
+    expect(res.statusCode).toBe(502);
+    expect(res.json().reconciled[0].status).toBe("written");
+    expect((await read(alice.agentId)).json().content).toContain("half-finished");
   });
 });

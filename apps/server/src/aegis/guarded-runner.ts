@@ -118,12 +118,14 @@ export class GuardedAgentRunner implements AgentRunner {
       steps: 0,
     };
     this.live.set(request.agentId, live);
+    // The capability exists only while this run does. See EgressBroker.
+    this.aegis.grantCapability(live.runToken, request.agentId, ticket.runId);
 
     // T6 - concurrency limit. Refused before a container exists, so a burst
     // cannot exhaust the host even when every individual run is well behaved.
     if (!this.aegis.acquireSlot(request.agentId)) {
       this.aegis.ledger.release(ticket.agentId, ticket.reservedUsd);
-      this.live.delete(request.agentId);
+      this.forgetRun(request.agentId, live);
       throw new ContainmentError(
         {
           decision: "Deny",
@@ -142,7 +144,7 @@ export class GuardedAgentRunner implements AgentRunner {
     // between admission and execution.
     if (this.aegis.latch.isArmed) {
       this.aegis.ledger.release(ticket.agentId, ticket.reservedUsd);
-      this.live.delete(request.agentId);
+      this.forgetRun(request.agentId, live);
       throw new ContainmentError(
         {
           decision: "Deny",
@@ -230,8 +232,19 @@ export class GuardedAgentRunner implements AgentRunner {
       throw error;
     } finally {
       this.aegis.releaseSlot(request.agentId);
-      this.live.delete(request.agentId);
+      this.forgetRun(request.agentId, live);
     }
+  }
+
+  /**
+   * Drops the run AND the capability it minted. These have to happen together:
+   * a token that outlives its run is an API key with extra steps, and the
+   * "dies with the run" property is the entire argument for handing the
+   * container a capability instead of the credential.
+   */
+  private forgetRun(agentId: string, live: Live): void {
+    this.live.delete(agentId);
+    this.aegis.revokeCapability(live.runToken);
   }
 
   /** G4 - attestation and ledger settlement. Runs on every exit path. */

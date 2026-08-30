@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Console from "./Console";
 import { api, ApiError, setAuthToken } from "./api";
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 
@@ -48,6 +49,13 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
+  /**
+   * The starter kit Playground, or the middleware console. Deliberately a
+   * sibling view rather than a rewrite of the Playground: the brief puts
+   * rebuilding the supplied UI out of scope, and the middleware is the only
+   * thing being judged here.
+   */
+  const [view, setView] = useState<"playground" | "console">("playground");
   const [authInput, setAuthInput] = useState("");
   const messageEnd = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
@@ -306,6 +314,10 @@ export default function App() {
     );
   }
 
+  if (view === "console") {
+    return <Console onExit={() => setView("playground")} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -329,6 +341,10 @@ export default function App() {
           }}
         >
           <span>＋</span> Create Agent
+        </button>
+
+        <button className="button console-link" onClick={() => setView("console")}>
+          <span>▤</span> Middleware console
         </button>
 
         <div className="sidebar-label">

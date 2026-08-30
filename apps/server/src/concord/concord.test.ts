@@ -9,6 +9,19 @@ const allowAll: AuthzCheck = (agentId) => ({
   humanId: "human:" + agentId,
 });
 
+/** Everyone but one Agent, which stands in for a warrant that does not cover the doc. */
+const denyOne =
+  (blocked: string): AuthzCheck =>
+  (agentId) =>
+    agentId === blocked
+      ? {
+          allowed: false,
+          ruleId: "WB-6.cross-owner",
+          reason: "Warrant does not cover this resource",
+          humanId: null,
+        }
+      : { allowed: true, ruleId: "test.allow", reason: "test", humanId: "human:" + agentId };
+
 const DOC = "src/limiter.ts";
 
 describe("three-way merge", () => {
@@ -208,8 +221,63 @@ describe("leases", () => {
   it("releases only for the holder", async () => {
     const store = new SharedDocStore(allowAll);
     await store.acquireLease(DOC, "alice_agent", 60_000);
-    expect(await store.releaseLease(DOC, "bob_agent")).toBe(false);
-    expect(await store.releaseLease(DOC, "alice_agent")).toBe(true);
+    expect((await store.releaseLease(DOC, "bob_agent")).status).toBe("not-holder");
+    expect((await store.releaseLease(DOC, "alice_agent")).status).toBe("released");
+  });
+
+  // The negative case for the release path. A holder id is not a secret - the
+  // listing shows it - so holder equality alone would let an Agent with no
+  // warrant strip someone else's exclusive lease.
+  it("denies a release from an Agent with no authority, lease intact", async () => {
+    const store = new SharedDocStore(denyOne("intruder_agent"));
+    store.seed(DOC, "protected");
+    await store.acquireLease(DOC, "alice_agent", 60_000);
+
+    const outcome = await store.releaseLease(DOC, "intruder_agent");
+    expect(outcome.status).toBe("denied");
+    if (outcome.status === "denied") expect(outcome.ruleId).toBe("WB-6.cross-owner");
+
+    // Still held: a denied release must not double as a lease breaker.
+    expect(store.snapshot(DOC)?.lease?.holder).toBe("alice_agent");
+    expect((await store.write(DOC, "bob_agent", 1, "sneak")).status).toBe("leased");
+  });
+});
+
+describe("read authority scopes what a caller can see", () => {
+  it("lists only the documents the caller may read", () => {
+    const store = new SharedDocStore((agentId, _action, resource) => ({
+      allowed: agentId === "alice_agent" || resource === "repo:shared/CHANGELOG.md",
+      ruleId: "test.scope",
+      reason: "scoped",
+      humanId: "human:" + agentId,
+    }));
+    store.seed("alice/secret.ts", "alice only");
+    store.seed("shared/CHANGELOG.md", "everyone");
+
+    expect(store.list("alice_agent").map((d) => d.id)).toEqual([
+      "alice/secret.ts",
+      "shared/CHANGELOG.md",
+    ]);
+    expect(store.list("bob_agent").map((d) => d.id)).toEqual(["shared/CHANGELOG.md"]);
+  });
+
+  it("denies history to an Agent the warrant does not cover", () => {
+    const store = new SharedDocStore(denyOne("intruder_agent"));
+    store.seed(DOC, "base");
+
+    const mine = store.readHistory(DOC, "alice_agent");
+    expect(mine.status).toBe("ok");
+
+    // History names the Agent and the human behind every version, so it is
+    // gated exactly like the content it describes.
+    const theirs = store.readHistory(DOC, "intruder_agent");
+    expect(theirs.status).toBe("denied");
+  });
+
+  it("answers denied before missing, so it cannot be used to probe for documents", () => {
+    const store = new SharedDocStore(denyOne("intruder_agent"));
+    expect(store.readHistory("does/not/exist.ts", "intruder_agent").status).toBe("denied");
+    expect(store.readHistory("does/not/exist.ts", "alice_agent").status).toBe("missing");
   });
 });
 
