@@ -16,7 +16,7 @@
 | **Required denial** | Alice's Agent → Bob's workspace ⇒ `WB-6.cross-owner-denied`, HTTP 403. |
 | **Revocation** | Owner revokes a live warrant; the very next action is refused. |
 | **Success test (§3)** | *"changing a user ID in the browser request cannot bypass the authorization decision."* |
-| **Evidence** | 202 tests. `npm run demo:warrant` prints the whole story. |
+| **Evidence** | 209 tests. `npm run demo:warrant` prints the whole story. |
 
 ---
 
@@ -262,7 +262,7 @@ tamper-**evident**, not tamper-resistant: host root can rewrite the whole chain.
 | Physical workspace isolation | 13 (`warrant/isolation.test.ts`) |
 | Retained Track C (AEGIS), incl. T6 and T7 controls | 90 |
 | Baseline, untouched | 12 |
-| **Total** | **202, all passing** |
+| **Total** | **209, all passing** |
 
 ## 8. Limitations, and what we would do next
 

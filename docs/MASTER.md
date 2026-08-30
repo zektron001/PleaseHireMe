@@ -11,7 +11,7 @@ off this one.
 | **Our selected track** | **B — The Bouncer (Identity and Authorization)** |
 | **Also present, not claimed** | C — Kill Switch (sandboxing) |
 | **Repo** | `github.com/zektron001/PleaseHireMe` |
-| **Verify everything** | `npm run check` → typecheck + **202 tests** + build |
+| **Verify everything** | `npm run check` → typecheck + **209 tests** + build |
 | **See the story** | `npm run demo:warrant` → 10 beats, ~2s, no Ark key needed |
 | **Last updated** | 2026-08-30 — see the changelog at the bottom |
 
@@ -166,6 +166,7 @@ So three people are not editing `store.ts` at once — which would be ironic:
 | D8 | Budget ledger, max steps, concurrency, kill switch | AEGIS | reserve-then-settle |
 | D9 | Shared documents: serialised writes, 3-way merge, leases | CONCORD | 29 tests |
 | D10 | Threat model against all seven brief threats | docs | [THREAT_MODEL.md](THREAT_MODEL.md) |
+| D11 | CONCORD read/release paths gated by the warrant | CONCORD | 7 tests; listing scoped, history gated, lease release authorised |
 
 ### Open — claim a row
 
@@ -194,7 +195,7 @@ that nobody sees. R10 is almost certainly not worth it — mock users are explic
 ```bash
 npm install
 
-# Everything: typecheck + 202 tests + build. This must stay green.
+# Everything: typecheck + 209 tests + build. This must stay green.
 npm run check
 
 # The Track B story in the terminal — no Ark key, no Docker needed.
@@ -246,7 +247,7 @@ Fitting, given what we are building:
 1. **One person per module at a time.** If two of you must touch `store.ts`, say so in the
    team chat first. We built a whole middleware about this problem; let us not demonstrate it
    on ourselves.
-2. **`npm run check` must be green before you push.** 202 tests. If you break one, fix it or
+2. **`npm run check` must be green before you push.** 209 tests. If you break one, fix it or
    revert — do not leave it red for someone else to find at 2am.
 3. **Every new control needs a positive *and* a negative test.** The negative one is the
    point. "It allows the good case" proves nothing about a security control.
@@ -279,6 +280,7 @@ Fitting, given what we are building:
 > Add a line whenever you change the roadmap or land something significant.
 > Format: `YYYY-MM-DD · @handle · what changed`
 
+- `2026-08-30` · `@jemy` · Closed two CONCORD authorization holes: `list`/`history` were ungated and `releaseLease` never checked authority (209 tests). Fixed beat 10 of the demo, which had been crashing on a 401 since trace access control landed.
 - `2026-08-30` · `@jemy` · CONCORD shared state added (29 tests); MASTER.md created; roadmap opened for claiming.
 - `2026-08-30` · `@jemy` · Threat model written against all seven brief threats; trace access control hole found and closed.
 - `2026-08-30` · `@jemy` · Physical workspace isolation landed (L2 closed, 13 tests).

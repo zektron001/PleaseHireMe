@@ -121,7 +121,7 @@ being told to look. See §6 for when this stops being the right call.
    same line -> conflict   reported, not silently resolved
 ```
 
-### Tests — 29 across two files
+### Tests — 36 across two files
 
 | Property | Test |
 | --- | --- |
@@ -133,8 +133,12 @@ being told to look. See §6 for when this stops being the right call.
 | Lease exclusivity and expiry | second writer `leased`; a dead holder's lease expires |
 | Per-document, not global, serialisation | two documents commit in parallel |
 | `sharedPaths` over HTTP | regression: the route schema had stripped it |
+| Listing is scoped to the caller | an Agent sees only documents its warrant covers |
+| History is gated like content | it names the Agent and human per version, so it is read authority, not public metadata |
+| Denied before missing | a caller without authority cannot probe which documents exist |
+| Release needs authority | naming the holder no longer strips someone else's lease; the lease survives |
 
-> The last row is worth flagging. `sharedPaths` reached the orchestrator in unit tests but
+> The `sharedPaths` row is worth flagging. It reached the orchestrator in unit tests but
 > was silently dropped by the route's Zod schema, so every shared write was denied over
 > HTTP. The unit tests passed because they called the orchestrator directly. **The demo
 > caught it, not the suite** — an argument for keeping an end-to-end path that exercises the
@@ -149,6 +153,7 @@ being told to look. See §6 for when this stops being the right call.
 | **C3** | Merge is O(n·m) in lines. | LCS table; fine for source files. | Patience or histogram diff for large documents. |
 | **C4** | Same-line edits always conflict. | Deliberate — see §4. | Per-character CRDT *if* real-time human co-editing is ever added. |
 | **C5** | No conflict *resolution* UI. Conflicts are reported over the API, not resolved anywhere. | Out of time. | Show both sides and let the owning human choose. |
+| **C7** | Concurrency *outcomes* (`merged`, `conflict`, `leased`) are not appended to the audit chain - only the authority decision behind them is. | The chain records authorization, and that is what Track B requires. | Append the outcome too, so "both edits survived" is chain evidence rather than an API response. |
 | **C6** | Agents do not yet write through CONCORD automatically. The store is driven by the API and the demo; the Codex runtime still writes to its own workspace. | The runtime seam is separate work. | Route agent file writes through the store. |
 
 **C6 is the biggest gap** — say it plainly if asked. CONCORD is a working, tested
