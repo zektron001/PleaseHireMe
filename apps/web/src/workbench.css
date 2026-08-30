@@ -281,7 +281,9 @@
 
 /* ---------------------------------------------------------------- side bar */
 
-.sidebar {
+/* Scoped to the workbench: the Playground has its own `.sidebar`, and an
+   unscoped `grid-area: sidebar` here threw that one into a phantom grid column. */
+.workbench > .sidebar {
   grid-area: sidebar;
   position: relative;
   display: flex;
