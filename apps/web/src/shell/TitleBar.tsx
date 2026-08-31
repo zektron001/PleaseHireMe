@@ -25,6 +25,9 @@ export function TitleBar({
   me,
   onSignIn,
   onQuickOpen,
+  onShare,
+  shareTarget,
+  onTour,
   theme,
   onCycleTheme,
   sidebarOpen,
@@ -37,6 +40,11 @@ export function TitleBar({
   me: Human | null;
   onSignIn: (human: Human) => void;
   onQuickOpen: () => void;
+  /** Opens the share sheet for the open document. Null when none is open. */
+  onShare: () => void;
+  shareTarget: string | null;
+  /** DEV ONLY: replays the first-run tour. See the note at the call site. */
+  onTour: () => void;
   theme: ThemeChoice;
   onCycleTheme: () => void;
   sidebarOpen: boolean;
@@ -59,7 +67,7 @@ export function TitleBar({
   }, []);
 
   return (
-    <header className="titlebar">
+    <header className="titlebar" data-tour="titlebar">
       <div className="titlebar-menus" ref={bar}>
         <span className="titlebar-logo">
           <Codicon name="layers" />
@@ -101,13 +109,37 @@ export function TitleBar({
         ))}
       </div>
 
-      <button className="quick-input" onClick={onQuickOpen}>
+      <button className="quick-input" data-tour="quick-input" onClick={onQuickOpen}>
         <Codicon name="search" />
         <span>{me ? "Search files and commands" : "Sign in to begin"}</span>
       </button>
 
       <div className="titlebar-right">
-        <div className="whoami">
+        {/* Google Docs puts Share top-right and so does everyone who copied it.
+            Keeping it there means nobody has to be told where it is. */}
+        <button
+          className="share-button"
+          data-tour="share-button"
+          disabled={!me || !shareTarget}
+          onClick={onShare}
+          title={
+            shareTarget
+              ? "Share " + shareTarget
+              : "Open a document to share it"
+          }
+        >
+          <Codicon name="person-add" />
+          Share
+        </button>
+
+        {/* DEV ONLY. This button goes away when the tour becomes first-run
+            only - see useTour.ts, which already reads and writes the seen
+            key. Until then it is how anyone (a judge included) replays it. */}
+        <button className="icon-button" onClick={onTour} title="Replay the tour (dev)">
+          <Codicon name="rocket" />
+        </button>
+
+        <div className="whoami" data-tour="whoami">
           {humans.map((human) => (
             <button
               key={human.id}

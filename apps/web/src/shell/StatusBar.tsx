@@ -42,7 +42,7 @@ export function StatusBar({ left, right }: { left: StatusItem[]; right: StatusIt
   };
 
   return (
-    <footer className="statusbar">
+    <footer className="statusbar" data-tour="statusbar">
       <div className="status-side">{left.map(render)}</div>
       <div className="status-side status-right">{right.map(render)}</div>
     </footer>

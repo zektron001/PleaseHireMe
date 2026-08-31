@@ -50,6 +50,10 @@ import { ExplorerView } from "./views/ExplorerView";
 import { AgentsView } from "./views/AgentsView";
 import { AgentChat } from "./views/AgentChat";
 import { CreateAgentDialog } from "./views/CreateAgentDialog";
+import { ShareDialog } from "./views/ShareDialog";
+import { SharedWithMe } from "./views/SharedWithMe";
+import { Tour } from "./onboarding/Tour";
+import { useTour } from "./onboarding/useTour";
 import { useAgents } from "./state/useAgents";
 import { SourceControlView } from "./views/SourceControlView";
 import { clockOf, colorOf, humanName, initialsOf, shortId } from "./participants";
@@ -184,6 +188,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [session, setSession] = useState<string | null>(null);
   const [view, setView] = useState<"dashboard" | "workspace" | "chat">("dashboard");
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const tour = useTour();
 
   const [review, setReview] = useState<ReviewState | null>(null);
   const [blame, setBlame] = useState<BlameView | null>(null);
@@ -775,6 +781,28 @@ export default function Console({ onExit }: { onExit: () => void }) {
     return null;
   };
 
+  /**
+   * The tour spotlights real chrome, which means the chrome has to be on
+   * screen before the step arrives. The sidebar is one element that answers
+   * to three different `data-tour` ids depending on which panel is showing,
+   * so "reveal the Explorer" is genuinely `setPanel("files")` and not a
+   * scroll. Memoized because <Tour> has this in an effect's dependency list.
+   */
+  const revealForTour = useCallback((target: string) => {
+    if (target === "explorer" || target === "agents" || target === "access") {
+      setPanel(target === "explorer" ? "files" : target);
+      setSidebarOpen(true);
+      return;
+    }
+    if (target === "activitybar") {
+      setSidebarOpen(true);
+      return;
+    }
+    if (target === "panel" || target === "panel-tabs") {
+      setBottomOpen(true);
+    }
+  }, []);
+
   return (
     <div
       className="workbench"
@@ -787,6 +815,9 @@ export default function Console({ onExit }: { onExit: () => void }) {
         me={me}
         onSignIn={(human) => void signIn(human)}
         onQuickOpen={() => setPalette({ open: true, mode: "" })}
+        onShare={() => setSharing(true)}
+        shareTarget={selected}
+        onTour={() => tour.start()}
         theme={theme}
         onCycleTheme={() =>
           setTheme((current) =>
@@ -811,6 +842,26 @@ export default function Console({ onExit }: { onExit: () => void }) {
         onClose={() => setPalette((current) => ({ ...current, open: false }))}
       />
 
+      <ShareDialog
+        open={sharing}
+        docId={selected}
+        viewerId={me?.id ?? null}
+        onClose={() => setSharing(false)}
+        // A new grant is a new warrant, so the Access panel is stale the
+        // instant one is made. Refetch rather than patch the list locally:
+        // the server is the only place the live set is actually known.
+        onChanged={() => {
+          void api
+            .access()
+            .then((result) => setWarrants(result.warrants))
+            .catch(() => undefined);
+        }}
+      />
+
+      {/* Last of the overlays, so its spotlight sits above the dialogs as
+          well as the workbench. */}
+      <Tour open={tour.open} onClose={tour.stop} onReveal={revealForTour} />
+
       <CreateAgentDialog
         open={showCreateAgent}
         busy={playground.busy}
@@ -822,7 +873,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
         <div className="console-error">{error ?? playground.error}</div>
       )}
 
-      <nav className="activitybar">
+      <nav className="activitybar" data-tour="activitybar">
         {PANELS.map((entry) => {
           const count = badge(entry.id);
           return (
@@ -846,7 +897,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
         <span className="activity-spacer" />
       </nav>
 
-      <aside className="sidebar">
+      <aside
+        className="sidebar"
+        data-tour={panel === "files" ? "explorer" : panel}
+      >
         <div className="sidebar-head">
           <span>{PANELS.find((entry) => entry.id === panel)?.label}</span>
           <span>{badge(panel) ?? ""}</span>
@@ -994,11 +1048,28 @@ export default function Console({ onExit }: { onExit: () => void }) {
             )}
             {me && panel === "usage" && <UsagePanel usage={board?.usage ?? []} />}
             {me && panel === "access" && (
-              <AccessPanel
-                warrants={warrants}
-                busy={busy !== null}
-                onRevoke={(id) => void revoke(id)}
-              />
+              <>
+                {/* Above the warrant list on purpose: a share you have not
+                    armed yet is the one thing here that needs an action. */}
+                <SharedWithMe
+                  onOpenDoc={(docId) => {
+                    setSelected(docId);
+                    setOpenTabs((tabs) => (tabs.includes(docId) ? tabs : [...tabs, docId]));
+                    setView("workspace");
+                  }}
+                  onChanged={() => {
+                    void api
+                      .access()
+                      .then((result) => setWarrants(result.warrants))
+                      .catch(() => undefined);
+                  }}
+                />
+                <AccessPanel
+                  warrants={warrants}
+                  busy={busy !== null}
+                  onRevoke={(id) => void revoke(id)}
+                />
+              </>
             )}
             {me && panel === "comments" && (
               <>
@@ -1047,7 +1118,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
         />
       </aside>
 
-      <main className="editor-area">
+      <main className="editor-area" data-tour="editor">
           <div className="doc">
             {view === "chat" ? (
               playground.selected ? (
@@ -1081,7 +1152,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
             ) : (
               <>
                 {openTabs.length > 0 && (
-                  <div className="tabstrip">
+                  <div className="tabstrip" data-tour="tabstrip">
                     <button
                       className="tab tab-back"
                       onClick={() => setView("dashboard")}
@@ -1349,7 +1420,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
 
       </main>
 
-      <div className="panel">
+      <div className="panel" data-tour="panel">
         <Sash
           orientation="horizontal"
           variable="--panel-height"
@@ -1359,7 +1430,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
           onCommit={(value) => rememberLayout({ panel: value })}
         />
         <div className="panel-head">
-          <div className="panel-tabs">
+          <div className="panel-tabs" data-tour="panel-tabs">
             {BOTTOM_TABS.map((tab) => {
               const count =
                 tab.id === "chain"

@@ -15,6 +15,9 @@ import type {
   LiveBoard,
   ReviewState,
   RunReport,
+  DocSharing,
+  ShareGrant,
+  ShareRole,
 } from "./types";
 
 export class ApiError extends Error {
@@ -242,6 +245,31 @@ export const api = {
   consultations: (docId: string) =>
     asHuman<{ consultations: Consultation[] }>(
       "/api/review/docs/" + encodeURIComponent(docId) + "/consultations",
+    ),
+
+  // --------------------------------------------------------- sharing
+  // Note what none of these send: a granter id. Who is sharing is read from
+  // the session token on the server, so editing a request body cannot make
+  // the grant come from somebody else.
+  sharing: (docId: string) =>
+    asHuman<DocSharing>("/api/share/docs/" + encodeURIComponent(docId)),
+  sharedWithMe: () =>
+    asHuman<{ viewer: string; grants: ShareGrant[] }>("/api/share/mine"),
+  share: (docId: string, body: { granteeId: string; role: ShareRole; ttlMs?: number }) =>
+    asHuman<{ grant: ShareGrant }>(
+      "/api/share/docs/" + encodeURIComponent(docId),
+      json(body),
+    ),
+  /** The grantee brings their own Agent, and only now is a warrant minted. */
+  attachAgent: (grantId: string, agentId: string) =>
+    asHuman<{ grant: ShareGrant; warrantId: string }>(
+      "/api/share/grants/" + encodeURIComponent(grantId) + "/agent",
+      json({ agentId }),
+    ),
+  unshare: (grantId: string, reason: string) =>
+    asHuman<{ grant: ShareGrant }>(
+      "/api/share/grants/" + encodeURIComponent(grantId) + "/revoke",
+      json({ reason }),
     ),
 
   // ------------------------------------------------------- live plane

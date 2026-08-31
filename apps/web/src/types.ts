@@ -435,3 +435,46 @@ export interface AccessWarrant {
   live: boolean;
   revocableByViewer: boolean;
 }
+
+/* ------------------------------------------------------- sharing --- */
+// The Google Docs surface over WARRANT. A grant is an ACL row naming two
+// humans and confers nothing on its own; authority appears only once the
+// GRANTEE attaches one of their own Agents and a warrant is minted for it.
+// See apps/server/src/warrant/sharing.ts for why it is built that way.
+
+export type ShareRole = "viewer" | "commenter" | "editor";
+
+/** One Agent the grantee brought, and the warrant minted for it. */
+export interface ShareAgent {
+  agentId: string;
+  warrantId: string;
+  live: boolean;
+  expiresAt: string;
+}
+
+export interface ShareGrant {
+  id: string;
+  docId: string;
+  role: ShareRole;
+  grantedBy: string;
+  grantedByName: string;
+  granteeId: string;
+  granteeName: string;
+  scopes: string[];
+  issuedAt: string;
+  expiresAt: string;
+  agents: ShareAgent[];
+}
+
+export interface DocSharing {
+  docId: string;
+  resource: string;
+  viewer: string;
+  /** False for a Viewer or Commenter: only writers may re-share. */
+  canShare: boolean;
+  /** The widest role the viewer may hand out. Attenuation, made visible. */
+  maxRole: ShareRole | null;
+  heldScopes: string[];
+  grants: ShareGrant[];
+  people: Human[];
+}
