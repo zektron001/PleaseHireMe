@@ -6,6 +6,8 @@ import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
 import { WarrantBindingError } from "../warrant/binding.js";
 import { activityBus } from "../live/activity.js";
+import { withAuthoredInstruction } from "./authored.js";
+import { applyAuthored } from "./apply-authored.js";
 import type { ReviewService } from "./service.js";
 import type { ReiterationRun, ReiterationStatus, ReviewComment } from "./types.js";
 
@@ -143,7 +145,13 @@ export async function runReiteration(
 
   let bound;
   try {
-    bound = deps.plane.binder.bind(agentId, prompt);
+    // `resolve: true` because this prompt DOES number its comments, so an
+    // ordinal has something to refer to. An ordinary work turn gets the review
+    // half only - see startTurn.
+    bound = deps.plane.binder.bind(
+      agentId,
+      withAuthoredInstruction(prompt, { resolve: true }),
+    );
   } catch (error) {
     if (error instanceof WarrantBindingError) {
       deps.plane.record(error.decision);
@@ -182,8 +190,7 @@ export async function runReiteration(
 
     const outcome = reconciled.find((entry) => entry.docId === docId);
     const status = mapStatus(outcome?.status);
-    void result;
-    return deps.review.closeRun(
+    const closed = deps.review.closeRun(
       run.id,
       status,
       outcome?.version ?? null,
@@ -191,6 +198,24 @@ export async function runReiteration(
         ? null
         : (outcome?.detail ?? "CONCORD refused the revision"),
     );
+    // The Agent's reply used to be discarded here. It is now the channel a
+    // resolution and any new peer feedback come back on - read AFTER closeRun,
+    // which has just written "addressed" over every comment in this run and
+    // would otherwise overwrite a resolution recorded before it, and after
+    // reconcile, so a new comment anchors to committed content rather than to
+    // text the store has not seen yet.
+    applyAuthored({
+      plane: deps.plane,
+      review: deps.review,
+      docId,
+      agentId,
+      subtaskId: subtask.id,
+      humanId,
+      purpose: "reiteration",
+      output: result.output,
+      answering: comments,
+    });
+    return closed;
   } catch (error) {
     deps.plane.orchestrator.setState(subtask.id, "assigned");
     watch.fail(error instanceof Error ? error.message : String(error));

@@ -203,7 +203,9 @@ export type CommentStatus =
   | "resolved"
   | "stale"
   | "conflict"
-  | "failed";
+  | "failed"
+  /** Two Agents could not settle it between them. Needs a human. */
+  | "blocked";
 
 export interface ReviewComment {
   id: string;
@@ -216,6 +218,16 @@ export interface ReviewComment {
   body: string;
   responsibleAgentId: string;
   createdByHumanId: string;
+  /**
+   * The Agent that raised this, or null when a human did.
+   *
+   * Deliberately NOT rendered: an Agent's comment is meant to read exactly like
+   * a human's. It is here because the auto-dispatch effect must send only
+   * Agent-raised feedback - a human's own comment goes when they say so.
+   */
+  createdByAgentId: string | null;
+  rounds: number;
+  agentResolved: string[];
   status: CommentStatus;
   lastReiterationRunId: string | null;
   createdAt: string;

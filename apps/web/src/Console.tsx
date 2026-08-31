@@ -319,7 +319,15 @@ export default function Console({ onExit }: { onExit: () => void }) {
     const current = board?.sessions.find((entry) => entry.id === session);
     if (!current || current.running > 0) return;
     if (!current.agents.some((agent) => agent.mine && agent.state === "assigned")) return;
-    void api.autorun(current.id).catch(() => undefined);
+    // Peer feedback before fresh work, and this order is what keeps the
+    // one-run-per-Agent 409 from firing: an Agent that just took a
+    // re-iteration is no longer idle, so it does not also get a plain turn.
+    void (async () => {
+      const sent = await api
+        .autoReiterate(current.id)
+        .catch(() => ({ runs: [] as unknown[] }));
+      if (sent.runs.length === 0) await api.autorun(current.id).catch(() => undefined);
+    })();
   }, [auto, board, session, busy]);
 
   // Poll: documents, the chain, the open document, and the collaboration board.

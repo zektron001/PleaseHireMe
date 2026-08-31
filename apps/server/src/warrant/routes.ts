@@ -25,6 +25,9 @@ import {
   parseCheckpoint,
   withCheckpointInstruction,
 } from "../concord/checkpoint.js";
+import { withAuthoredInstruction } from "../review/authored.js";
+import { applyAuthored } from "../review/apply-authored.js";
+import type { ReviewService } from "../review/service.js";
 import { WarrantBindingError } from "./binding.js";
 import { activityBus } from "../live/activity.js";
 import { watchWorkspaceFile } from "../live/workspace.js";
@@ -106,6 +109,11 @@ export async function registerWarrantRoutes(
   plane: WarrantPlane,
   /** Absent in unit tests that never execute a turn. */
   runner?: AgentRunner,
+  /**
+   * Absent in unit tests, and in any deployment without the review loop. When
+   * present, an Agent's turn output is read for peer review markers.
+   */
+  review?: ReviewService,
 ): Promise<void> {
   const requireHuman = (request: FastifyRequest) => {
     const human = plane.whoami(bearerToken(request));
@@ -250,7 +258,15 @@ export async function registerWarrantRoutes(
 
     let bound;
     try {
-      bound = plane.binder.bind(subtask.agentId, withCheckpointInstruction(prompt));
+      // `resolve: false`: a work turn is shown no numbered comment list, so an
+      // ordinal would have nothing to point at and asking for one invites the
+      // model to invent it.
+      bound = plane.binder.bind(
+        subtask.agentId,
+        withCheckpointInstruction(
+          withAuthoredInstruction(prompt, { resolve: false }),
+        ),
+      );
     } catch (error) {
       if (error instanceof WarrantBindingError) {
         plane.record(error.decision);
@@ -319,6 +335,22 @@ export async function registerWarrantRoutes(
       // it and the success path never did. "submitted" is a separate step the
       // owner takes; finishing a turn is not submitting it.
       plane.orchestrator.setState(subtask.id, "assigned");
+      // Read AFTER reconcile, never before: a comment's anchor is derived from
+      // canonical content, so parsing first would anchor this Agent's feedback
+      // to text the store had not yet accepted and every comment would be born
+      // stale. No `answering` list - a work turn was shown no comments.
+      if (review && subtask.sectionDoc) {
+        applyAuthored({
+          plane,
+          review,
+          docId: subtask.sectionDoc,
+          agentId: subtask.agentId,
+          subtaskId: subtask.id,
+          humanId: human.id,
+          purpose: "turn",
+          output: result.output,
+        });
+      }
       return {
         subtaskId: subtask.id,
         agentId: subtask.agentId,

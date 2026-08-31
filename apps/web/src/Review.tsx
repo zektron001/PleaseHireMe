@@ -19,6 +19,7 @@ const STATUS_LABEL: Record<string, string> = {
   stale: "stale — code moved",
   conflict: "conflict — canonical code kept",
   failed: "failed",
+  blocked: "blocked — needs you",
 };
 
 export function shortAgent(id: string): string {

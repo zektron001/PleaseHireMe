@@ -98,6 +98,57 @@ describe("review state survives a restart", () => {
     expect(service.listComments(DOC)).toHaveLength(0);
   });
 
+  it("reads a version 1 file written before Agents could comment", async () => {
+    // The read path is the migration. A v1 file predates Agent-authored
+    // comments, so everything in it was written by a human - and saying so by
+    // defaulting is safer than a separate upgrade step somebody can skip.
+    const dir = await mkdtemp(path.join(tmpdir(), "review-persist-"));
+    dirs.push(dir);
+    const file = path.join(dir, "review-state.json");
+    const { writeFile, readFile } = await import("node:fs/promises");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        comments: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            docId: DOC,
+            baseVersion: 2,
+            startLine: 2,
+            endLine: 2,
+            selectedText: "TWO by A",
+            selectedTextHash: "whatever",
+            body: "rename this",
+            responsibleAgentId: "agent-a",
+            createdByHumanId: "human:alice",
+            status: "open",
+            lastReiterationRunId: null,
+            createdAt: "2026-08-30T16:00:00.000Z",
+            updatedAt: "2026-08-30T16:00:00.000Z",
+          },
+        ],
+        runs: [],
+        events: [],
+      }),
+      "utf8",
+    );
+
+    const store = await seededStore();
+    const service = new ReviewService(store, Date.now, { persistPath: file });
+    await service.initialize();
+
+    const restored = service.listComments(DOC)[0];
+    expect(restored?.createdByAgentId).toBeNull();
+    expect(restored?.rounds).toBe(0);
+    expect(restored?.agentResolved).toEqual([]);
+
+    // And it is written back at the current version.
+    service.setStatus(restored!.id, "resolved");
+    await service.flush();
+    expect(JSON.parse(await readFile(file, "utf8")).version).toBe(2);
+  });
+
   it("rejects an unsupported state format rather than guessing", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "review-persist-"));
     dirs.push(dir);

@@ -46,6 +46,16 @@ const envSchema = z.object({
     .default("https://ark.cn-beijing.volces.com/api/v3"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
+  /**
+   * Re-iterations an Agent-authored review comment may spend before it is
+   * handed to a human. Never applies to a human's own comment.
+   *
+   * Not an AEGIS control: AEGIS bounds what one run may cost, this bounds how
+   * many runs a disagreement between two Agents is worth before somebody who
+   * can actually settle it is asked to.
+   */
+  REVIEW_MAX_AGENT_ROUNDS: z.coerce.number().int().min(1).max(20).default(3),
+
   // ---- AEGIS (Track C middleware) ----
   AEGIS_VAULT_PATH: z.string().default(path.resolve("vault")),
   /** Empty means "write the built-in profile into the data directory". */
@@ -119,6 +129,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
     nodeEnv: env.NODE_ENV,
+    reviewMaxAgentRounds: env.REVIEW_MAX_AGENT_ROUNDS,
 
     aegisEnabled: env.AEGIS_ENABLED,
     aegisCaptureLevel: env.AEGIS_CAPTURE_LEVEL,

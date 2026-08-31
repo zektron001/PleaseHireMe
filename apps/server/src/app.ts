@@ -15,6 +15,7 @@ import type { WarrantPlane } from "./warrant/index.js";
 import { registerWarrantRoutes } from "./warrant/routes.js";
 import { registerConcordRoutes } from "./concord/routes.js";
 import { registerReviewRoutes } from "./review/routes.js";
+import { ReviewService } from "./review/service.js";
 import { registerLiveRoutes } from "./live/routes.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -39,6 +40,11 @@ export async function createApp(
   warrantPlane?: WarrantPlane,
   /** Used only by the subtask run route. Absent in tests that never run a turn. */
   runner?: AgentRunner,
+  /**
+   * Injected so a test can hold the same instance the routes use. Production
+   * omits it and gets the persisted one built below.
+   */
+  injectedReview?: ReviewService,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -169,13 +175,23 @@ export async function createApp(
   }
 
   if (warrantPlane) {
-    await registerWarrantRoutes(app, warrantPlane, runner);
+    // Built here rather than inside registerReviewRoutes because the turn path
+    // in registerWarrantRoutes needs it too: an Agent's review comments are
+    // parsed out of its turn output, and warrant routes are registered first.
+    const review =
+      injectedReview ??
+      new ReviewService(warrantPlane.docs, Date.now, {
+        persistPath: path.join(config.dataDirectory, "review-state.json"),
+        maxAgentRounds: config.reviewMaxAgentRounds,
+      });
+    await registerWarrantRoutes(app, warrantPlane, runner, review);
     await registerConcordRoutes(app, warrantPlane);
-    const review = await registerReviewRoutes(
+    await registerReviewRoutes(
       app,
       warrantPlane,
       runner ?? null,
       path.join(config.dataDirectory, "review-state.json"),
+      review,
     );
     await registerLiveRoutes(app, { plane: warrantPlane, review });
   }

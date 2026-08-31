@@ -48,6 +48,7 @@ const consultBody = z.object({
   targetAgentId: z.string().trim().min(1).optional(),
 });
 const consultParams = z.object({ id: z.string().uuid() });
+const autoParams = z.object({ taskId: z.string().trim().min(1).max(200) });
 
 export async function registerReviewRoutes(
   app: FastifyInstance,
@@ -83,6 +84,18 @@ export async function registerReviewRoutes(
    * otherwise a reviewer could run a colleague's Agent with nothing in the
    * chain naming who did it.
    */
+  /**
+   * Does this human own that Agent? Answers the ONE question that entitles
+   * somebody to dispatch an Agent-authored comment: it is aimed at an Agent
+   * they are accountable for, so the run it starts is theirs to answer for.
+   *
+   * Silent - no audit record - because it only decides which comments are
+   * eligible. The dispatch itself still goes through requireOwnership below,
+   * which is what writes the decision to the chain.
+   */
+  const ownsAgent = (human: HumanPrincipal) => (agentId: string) =>
+    plane.orchestrator.subtaskByAgent(agentId)?.ownerId === human.id;
+
   const requireOwnership = (human: HumanPrincipal, agentId: string) => {
     const subtask = plane.orchestrator.subtaskByAgent(agentId);
     if (!subtask) throw new HttpError(409, "That Agent is not assigned to a subtask");
@@ -217,7 +230,69 @@ export async function registerReviewRoutes(
   app.post("/api/review/reiterations", async (request, reply) => {
     const human = requireHuman(request);
     const { commentIds } = reiterateBody.parse(request.body);
-    const groups = review.planRuns(commentIds, human.id);
+    const groups = review.planRuns(commentIds, human.id, ownsAgent(human));
+    for (const group of groups) requireOwnership(human, group.agentId);
+
+    const runs = await Promise.all(
+      groups.map((group) =>
+        runReiteration(
+          { plane, docs: plane.docs, reconciler: plane.reconciler, review, runner },
+          group.docId,
+          group.agentId,
+          human.id,
+          group.comments,
+        ).catch((error: unknown) => ({
+          error: error instanceof HttpError ? error.message : "Re-iteration failed",
+          docId: group.docId,
+          agentId: group.agentId,
+        })),
+      ),
+    );
+    return reply.code(202).send({ runs });
+  });
+
+  /**
+   * Auto mode, for peer review feedback.
+   *
+   * No Agent can reach this, or anything else: there is no Agent-side token and
+   * `agentId` is a selector rather than a credential. The dispatch belongs to
+   * the human who turned Auto mode on, and this route spends exactly that
+   * standing consent - the work it starts is byte-for-byte what the manual
+   * button starts, through the same planRuns, the same ownership record and the
+   * same runReiteration.
+   *
+   * Scoped to comments an AGENT raised. A human's own feedback is never
+   * auto-sent: they wrote it, they choose when it goes.
+   */
+  app.post("/api/review/tasks/:taskId/auto-reiterate", async (request, reply) => {
+    const human = requireHuman(request);
+    const { taskId } = autoParams.parse(request.params);
+
+    const idle = new Set(
+      plane.orchestrator
+        .subtasksOf(taskId)
+        .filter((subtask) => subtask.ownerId === human.id)
+        .filter((subtask) => subtask.state === "assigned")
+        .map((subtask) => subtask.agentId),
+    );
+    // `open` only. Everything else is either in flight, already answered, or
+    // waiting on a human - and `blocked` in particular must not be re-sent, or
+    // the escalation would decorate the loop rather than stop it.
+    const pending = review
+      .listAllComments()
+      .filter(
+        (comment) =>
+          comment.createdByAgentId !== null &&
+          comment.status === "open" &&
+          idle.has(comment.responsibleAgentId),
+      );
+    if (pending.length === 0) return reply.code(200).send({ runs: [] });
+
+    const groups = review.planRuns(
+      pending.map((comment) => comment.id),
+      human.id,
+      ownsAgent(human),
+    );
     for (const group of groups) requireOwnership(human, group.agentId);
 
     const runs = await Promise.all(

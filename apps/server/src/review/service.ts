@@ -29,10 +29,19 @@ export function sliceLines(content: string, start: number, end: number): string 
 export interface ReviewStoreOptions {
   /** Where to persist review state. Omitted in tests: memory only. */
   readonly persistPath?: string | undefined;
+  /**
+   * Re-iterations an Agent-authored comment may spend before it is handed to a
+   * human. Never applies to a human's own comment - a human decides for
+   * themselves when they have asked enough times.
+   */
+  readonly maxAgentRounds?: number | undefined;
 }
 
+const DEFAULT_MAX_AGENT_ROUNDS = 3;
+
 interface PersistedReview {
-  readonly version: 1;
+  /** 1 predates Agent-authored comments; see initialize() for the upgrade. */
+  readonly version: 1 | 2;
   readonly comments: readonly ReviewComment[];
   readonly runs: readonly ReiterationRun[];
   readonly events: readonly ReviewEvent[];
@@ -43,7 +52,16 @@ export interface CreateCommentInput {
   readonly startLine: number;
   readonly endLine: number;
   readonly body: string;
+  /**
+   * The accountable human: the session holder, or - when an Agent raised this -
+   * that Agent's owner, resolved by the caller. ReviewService holds no
+   * orchestrator, deliberately, so it cannot look an owner up itself.
+   */
   readonly humanId: string;
+  /** Set when an Agent raised this rather than a human. */
+  readonly agentId?: string | undefined;
+  /** Rounds already spent by the comment this answers, so a reply inherits it. */
+  readonly rounds?: number | undefined;
   /** An explicit human choice, required when provenance is ambiguous. */
   readonly targetAgentId?: string | undefined;
 }
@@ -92,11 +110,20 @@ export class ReviewService {
       throw error;
     }
     const parsed = JSON.parse(raw) as PersistedReview;
-    if (parsed.version !== 1 || !Array.isArray(parsed.comments)) {
+    if ((parsed.version !== 1 && parsed.version !== 2) || !Array.isArray(parsed.comments)) {
       throw new Error("Unsupported review state format");
     }
     for (const comment of parsed.comments) {
-      this.comments.set(comment.id, structuredClone(comment));
+      // The read path IS the migration, which is the only kind that cannot be
+      // forgotten. A v1 file predates Agent-authored comments, so every comment
+      // in it was written by a human, has spent no rounds, and has no Agent
+      // agreement recorded. Defaults first so a v2 file's real values win.
+      this.comments.set(comment.id, {
+        createdByAgentId: null,
+        rounds: 0,
+        agentResolved: [],
+        ...structuredClone(comment),
+      });
     }
     for (const run of parsed.runs ?? []) this.runs.set(run.id, structuredClone(run));
     this.events.push(...(parsed.events ?? []).map((event) => structuredClone(event)));
@@ -111,7 +138,7 @@ export class ReviewService {
     const file = this.options.persistPath;
     if (!file) return Promise.resolve();
     const payload: PersistedReview = {
-      version: 1,
+      version: 2,
       comments: [...this.comments.values()],
       runs: [...this.runs.values()],
       events: this.events,
@@ -225,6 +252,14 @@ export class ReviewService {
       );
     }
 
+    // An Agent commenting on lines it wrote itself would be routed straight
+    // back to itself: a thread with no peer in it, which the rounds cap would
+    // only stop after burning three real runs. Provenance cannot catch this,
+    // because "who wrote these lines" is the right answer to the wrong question.
+    if (input.agentId && input.agentId === chosen) {
+      throw new HttpError(409, "An Agent cannot review its own lines");
+    }
+
     const at = this.stamp();
     const comment: ReviewComment = {
       id: randomUUID(),
@@ -237,6 +272,9 @@ export class ReviewService {
       body,
       responsibleAgentId: chosen,
       createdByHumanId: input.humanId,
+      createdByAgentId: input.agentId ?? null,
+      rounds: input.rounds ?? 0,
+      agentResolved: [],
       status: "open",
       lastReiterationRunId: null,
       createdAt: at,
@@ -246,8 +284,8 @@ export class ReviewService {
     void this.persist();
     this.append(
       input.docId,
-      "human",
-      input.humanId,
+      input.agentId ? "agent" : "human",
+      input.agentId ?? input.humanId,
       "comment.created",
       "Comment on lines " +
         input.startLine +
@@ -305,8 +343,68 @@ export class ReviewService {
     return hashText(current) === comment.selectedTextHash;
   }
 
+  /**
+   * The anchored lines moved, so the comment is held rather than sent.
+   *
+   * Agent-authored comments are held as `blocked`, not `stale`, and the
+   * difference is not cosmetic: the Review panel filters `stale` out of the
+   * open list, which is right for a human's own comment - they wrote it, they
+   * can see it went stale, they can write another. Nobody is watching on an
+   * Agent's behalf, so a stale Agent comment marked `stale` would vanish with
+   * no human ever learning a peer raised something.
+   */
   markStale(comment: ReviewComment): ReviewComment {
-    return this.setStatus(comment.id, "stale");
+    return this.setStatus(comment.id, comment.createdByAgentId ? "blocked" : "stale");
+  }
+
+  /**
+   * An Agent records that it considers a comment settled.
+   *
+   * THE DEPARTURE lives on this method, and only here. The standing rule is
+   * that comments become `addressed`, never `resolved`, because "an Agent
+   * producing a patch is not a human agreeing the point was handled". That rule
+   * protects a HUMAN's judgement about their own feedback, and for a human's
+   * comment it is untouched below.
+   *
+   * When both parties are Agents there is no human judgement to short-circuit:
+   * nobody wrote the point who could agree it was met. So the two Agents
+   * settling it is the whole of the agreement - and it takes BOTH, because one
+   * Agent declaring its own work acceptable is exactly the thing the original
+   * rule refuses.
+   */
+  agentResolve(commentId: string, agentId: string): ReviewComment {
+    const comment = this.get(commentId);
+    if (!comment.createdByAgentId) {
+      throw new HttpError(403, "Only a human resolves a human's comment");
+    }
+    if (agentId !== comment.createdByAgentId && agentId !== comment.responsibleAgentId) {
+      throw new HttpError(403, "That Agent is not party to this comment");
+    }
+
+    const stored = this.comments.get(commentId) as ReviewComment;
+    if (!stored.agentResolved.includes(agentId)) stored.agentResolved.push(agentId);
+    stored.updatedAt = this.stamp();
+
+    const mutual =
+      stored.agentResolved.includes(stored.createdByAgentId as string) &&
+      stored.agentResolved.includes(stored.responsibleAgentId);
+    const result = mutual
+      ? this.setStatus(commentId, "resolved")
+      : structuredClone(stored);
+
+    void this.persist();
+    this.append(
+      stored.docId,
+      "agent",
+      agentId,
+      "comment.resolved",
+      mutual
+        ? "Both Agents settled the comment on lines " +
+          stored.startLine + "-" + stored.endLine
+        : "Agreed the comment on lines " +
+          stored.startLine + "-" + stored.endLine + " is settled",
+    );
+    return result;
   }
 
   setStatus(commentId: string, status: CommentStatus): ReviewComment {
@@ -350,16 +448,31 @@ export class ReviewService {
    * Comments aimed at different Agents become separate runs so those Agents can
    * proceed independently - the parallelism the whole platform is about.
    */
+  /**
+   * @param ownsAgent Whether this human owns an Agent. Passed in rather than
+   *   looked up: ReviewService holds no orchestrator, and taking the predicate
+   *   as an argument means the check below cannot be skipped by a caller who
+   *   forgets to pair this with the route's own ownership check.
+   */
   planRuns(
     commentIds: readonly string[],
     humanId: string,
+    ownsAgent: (agentId: string) => boolean = () => false,
   ): { docId: string; agentId: string; comments: ReviewComment[] }[] {
     if (commentIds.length === 0) throw new HttpError(400, "No comments selected");
     const groups = new Map<string, { docId: string; agentId: string; comments: ReviewComment[] }>();
     for (const id of commentIds) {
       const comment = this.get(id);
-      if (comment.createdByHumanId !== humanId) {
-        // Someone else's review feedback is not this human's to dispatch.
+      // Feedback a HUMAN wrote stays that human's to dispatch, unchanged.
+      //
+      // Feedback an AGENT raised is nobody's property: no human wrote it, so
+      // asking whether this human authored it is the wrong question rather than
+      // a weaker version of the right one. The human entitled to spend an Agent
+      // on it is the one who owns the Agent being ASKED - they answer for the
+      // run it starts.
+      const ownsRecipient =
+        comment.createdByAgentId !== null && ownsAgent(comment.responsibleAgentId);
+      if (comment.createdByHumanId !== humanId && !ownsRecipient) {
         throw new HttpError(403, "That comment belongs to another reviewer");
       }
       if (comment.status === "resolved") {
@@ -431,10 +544,35 @@ export class ReviewService {
   }
 
   /**
+   * Where an Agent-authored comment stops being the Agents' problem.
+   *
+   * A human's comment is never escalated: they can see the outcome and decide
+   * for themselves whether to ask again. An Agent-authored one has nobody
+   * watching it, so every way a round can end badly has to route to a human
+   * rather than sit at a status that reads like progress.
+   */
+  private escalate(
+    comment: ReviewComment,
+    outcome: CommentStatus,
+    maxRounds: number,
+  ): CommentStatus {
+    if (!comment.createdByAgentId) return outcome;
+    // CONCORD refused it, or the run died - including every AEGIS refusal,
+    // which arrives here as `failed`. Neither is something a retry fixes.
+    if (outcome === "conflict" || outcome === "failed") return "blocked";
+    // The revision landed, but the two Agents have not both called it settled
+    // and the budget is gone. That is a disagreement, and it is a human's.
+    if (comment.rounds >= maxRounds && outcome !== "resolved") return "blocked";
+    return outcome;
+  }
+
+  /**
    * Records what CONCORD decided about the Agent's revision.
    *
    * Comments become "addressed", never "resolved": an Agent producing a patch
-   * is not the same as a human agreeing the point was handled.
+   * is not the same as a human agreeing the point was handled. The one
+   * exception is an Agent-to-Agent thread, where both ends must agree - see
+   * `agentResolve`, which is the only place that writes "resolved" for one.
    */
   closeRun(
     runId: string,
@@ -457,10 +595,16 @@ export class ReviewService {
           : status === "no_change"
             ? "open"
             : "failed";
+    const maxRounds = this.options.maxAgentRounds ?? DEFAULT_MAX_AGENT_ROUNDS;
     for (const id of run.commentIds) {
       const comment = this.comments.get(id);
       if (comment) {
-        comment.status = commentStatus;
+        // Counted on CLOSE, not on open: a run that never completed did not
+        // spend a round. The cost is that a crash loop never advances the
+        // counter - but a crash loop lands on `failed`, which escalates below
+        // anyway, so nothing rides on the counter to stop it.
+        comment.rounds += 1;
+        comment.status = this.escalate(comment, commentStatus, maxRounds);
         comment.updatedAt = run.completedAt;
       }
     }

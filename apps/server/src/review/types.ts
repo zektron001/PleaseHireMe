@@ -15,7 +15,15 @@ export type CommentStatus =
   /** The code the comment was anchored to has changed underneath it. */
   | "stale"
   | "conflict"
-  | "failed";
+  | "failed"
+  /**
+   * Two Agents could not settle it between them, so a human has to.
+   *
+   * Distinct from `stale` and `failed` because the Review panel hides `stale`
+   * (Review.tsx) and `failed` reads as a platform fault. This one is a request
+   * for a human decision, and it has to stay visible to get one.
+   */
+  | "blocked";
 
 export interface ReviewComment {
   readonly id: string;
@@ -30,7 +38,25 @@ export interface ReviewComment {
   readonly selectedTextHash: string;
   readonly body: string;
   readonly responsibleAgentId: string;
+  /**
+   * The human accountable for this comment.
+   *
+   * For an Agent-authored comment this is the Agent's OWNER, not a session
+   * holder - the Agent speaks on the authority its human delegated, which is
+   * the WARRANT premise, and it keeps every existing reader of this field
+   * correct without a second notion of who is answerable.
+   */
   readonly createdByHumanId: string;
+  /** The Agent that raised this, or null when a human did. */
+  readonly createdByAgentId: string | null;
+  /**
+   * Re-iterations spent on this comment. The escalation budget: an
+   * Agent-authored comment that burns it goes to `blocked` rather than round
+   * four. Inherited by a reply, so opening a fresh comment cannot reset it.
+   */
+  rounds: number;
+  /** Agent ids that have called this settled. Mutual resolve needs both ends. */
+  agentResolved: string[];
   status: CommentStatus;
   lastReiterationRunId: string | null;
   readonly createdAt: string;

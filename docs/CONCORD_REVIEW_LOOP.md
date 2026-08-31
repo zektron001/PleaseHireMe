@@ -148,6 +148,13 @@ CONCORD's own outcome is reported unchanged:
 Comments become **addressed**, never **resolved**. An Agent producing a patch is
 not a human agreeing the point was handled. Only a human resolves.
 
+**One exception, added with Agent-authored comments:** when *both* parties to a
+comment are Agents, there is no human whose judgement the rule protects — nobody
+wrote the point who could agree it was met. Such a comment resolves when both
+the authoring and the responsible Agent have said so, and only then. See
+`agentResolve` in `review/service.ts`, which is the sole path that writes
+`resolved` for one. A human's own comment is unaffected.
+
 ## Context retrieval, and why there is no vector database
 
 For a comment on a line range the file and the lines are already known. There is
@@ -158,6 +165,55 @@ them.
 
 An embedding index would add a dependency, an indexing job and a staleness
 problem in exchange for a lookup we can already do exactly.
+
+## Agent-authored comments
+
+The loop above is one-directional: a human raises, an Agent answers. An Agent
+that reads a sibling's section and sees a real problem can now raise it too, and
+the sibling receives it **as if a human had asked** — the re-iteration prompt is
+byte-identical either way, still `Reviewer wrote:`, and there is a test that
+asserts exactly that equality rather than trusting it.
+
+**How it arrives.** Not through HTTP. There is no Agent-side token and
+`agentId` is a selector rather than a credential, so an Agent authoring a
+comment is the server doing it on the Agent's behalf after the turn — the same
+shape as every other agent-originated write. The Agent emits a marker, in the
+`CONCORD-COMMIT:` family:
+
+```
+CONCORD-REVIEW: L<start>-L<end> <what is wrong, in one line>
+CONCORD-RESOLVE: <the comment's number> <why it is settled>
+```
+
+Parsed in `review/authored.ts` and applied by `review/apply-authored.ts` from
+the two places a turn can end. Neither marker carries a target Agent id or a
+comment id: routing comes from provenance as it does for a human, and a
+resolution refers to the ordinal the re-iteration prompt already prints. Every
+id not asked of a model is an id it cannot hallucinate onto somebody else.
+
+**Authorization is not new.** Every subtask Agent already held `comment:write`
+(`warrant/orchestrator.ts`), so the PDP is asked the ordinary question —
+`plane.check(agentId, "comment.write", …)` — which is the check the human path
+documents as impossible for want of an Agent whose warrant to read. A revoked
+warrant silently stops an Agent commenting, and the chain says why.
+
+**Who may dispatch it.** A human's comment stays that human's to send. An
+Agent's belongs to whoever owns the Agent being *asked* — they answer for the
+run it starts. `planRuns` takes an ownership predicate; the route still calls
+`requireOwnership`, which is what writes `WB-0.owner-runs-agent` or
+`WB-6.cross-owner` to the chain. Both halves are required, and the guarantee
+lives in the pair.
+
+**Where it stops.** `REVIEW_MAX_AGENT_ROUNDS` (default 3) bounds a
+disagreement. Past it — or on a CONCORD conflict, a stale anchor, or any AEGIS
+refusal — the comment becomes `blocked` and waits for a human. `blocked` rather
+than `stale` deliberately: the Review panel hides `stale`, and an Agent's
+comment that vanished would be feedback no human ever learned about.
+
+**Ordering that matters.** Markers are read *after* `reconcile`, so a new
+comment anchors to committed content; and resolutions are applied *after*
+`closeRun`, which has just written `addressed` over the run's comments and would
+otherwise overwrite them.
 
 ## API
 
@@ -172,6 +228,7 @@ problem in exchange for a lookup we can already do exactly.
 | POST | `/api/review/reiterations` | Send comments to their Agents |
 | POST | `/api/review/consultations` | Ask, without changing anything |
 | GET | `/api/review/consultations/:id` | One consultation |
+| POST | `/api/review/tasks/:taskId/auto-reiterate` | Auto mode: send Agent-raised feedback waiting on your idle Agents |
 
 ## Scenarios
 
@@ -212,6 +269,39 @@ not been reviewed in a browser.
 - A stale comment is held, never relocated.
 - No comment threads and no replies. One comment, one body.
 - `ReviewService` is single-process, like `SharedDocStore`.
+
+### Agent-authored comments: verified vs not
+
+**Deterministically verified** (33 tests over `authored.ts`,
+`agent-to-agent.test.ts` and the persistence suite, against the real WARRANT
+plane and the real CONCORD store): marker parsing, including the cap, the
+dedupe, truncation and the line-anchoring; provenance routing of an Agent's
+comment and its attribution to the author's *owner*; the review event recorded
+with an `agent` actor; refusal of an Agent reviewing its own lines; a revoked
+warrant stopping a comment; the recipient's owner being able to dispatch while
+the author is still refused at the route with `WB-6.cross-owner` in the chain;
+the non-regression that a human's comment stays its author's to dispatch;
+mutual resolve needing both ends; `blocked` on the rounds cap, on a CONCORD
+conflict, and on a moved anchor; a human's comment never being escalated; and
+the version-1 state file loading as human-authored.
+
+The prompt equality is asserted, not assumed: one test compiles the
+re-iteration prompt for a human-authored and an Agent-authored comment with the
+same body and requires the two strings to be identical.
+
+**Not verified.** No live model has ever emitted these markers — there is no
+`codex` binary or container engine on the machine this was built on, so every
+test above drives a stub runner returning canned output. Specifically unproven:
+whether a real model emits `CONCORD-REVIEW` at a useful rate or at all, whether
+it emits `CONCORD-RESOLVE` often enough for a thread to close by agreement
+rather than by exhausting the cap, and how often it names a range that
+provenance then refuses. The most likely real-world failure is a correct-but-
+useless system in which nothing is ever mutually resolved and every thread
+escalates at round three.
+
+Also unverified: the browser Auto-mode loop end to end, and the interaction
+between a peer comment whose range spans a section boundary and
+`CD-section.outside`.
 
 ## Commands
 

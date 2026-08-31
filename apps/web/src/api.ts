@@ -236,6 +236,19 @@ export const api = {
   reiterate: (commentIds: string[]) =>
     asHuman<{ runs: ReiterationRun[] }>("/api/review/reiterations", json({ commentIds })),
 
+  /**
+   * Sends every Agent-raised comment waiting on one of your idle Agents.
+   *
+   * Auto mode only. The server picks the comments; this call carries the
+   * consent, which is why it is a normal signed-in request and not something an
+   * Agent could ever make for itself.
+   */
+  autoReiterate: (taskId: string) =>
+    asHuman<{ runs: ReiterationRun[] }>(
+      "/api/review/tasks/" + encodeURIComponent(taskId) + "/auto-reiterate",
+      json({}),
+    ),
+
   consult: (body: {
     docId: string;
     agentId: string;
