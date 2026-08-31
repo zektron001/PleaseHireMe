@@ -109,15 +109,50 @@ the answer, because the id is never read from the request — it comes from the
 session token.
 
 
-## Screenshots
+## What the middleware actually does
 
-### Agent Playground
+Four things the starter kit could not express. Every one of these is a backend
+decision — the browser is only showing you what it was told.
 
-![Agent Playground showing lifecycle controls, starter prompts, and the Codex Runtime](docs/assets/playground.jpg)
+### One task, fanned out — one owner and one Agent per subtask
 
-### Create an Agent
+![The task strip: two subtasks, each with its owning human and the short id of the Agent acting for them](docs/assets/mw-fanout.jpg)
 
-![Create Agent form with name, description, and workspace instructions](docs/assets/create-agent.jpg)
+Splitting a task issues one warrant per subtask. The chip names the human
+accountable for it and the Agent that acts for them — and the button reads
+**RUN ANYWAY** when the Agent is not yours.
+
+### The refusal — changing who you claim to be does not change the answer
+
+![The operator presses Run on an Agent that acts for Bob, and the backend refuses with "Only human:bob may run this Agent"](docs/assets/mw-refusal.jpg)
+
+Signed in as the orchestrator, pressing Run on Bob's Agent is refused by the
+server with the rule that caused it. The id is never read from the request, so
+there is nothing in the browser to tamper with. This is `WB-6` territory: the
+required denial for the track.
+
+### Whose Agent is whose, before you click the wrong one
+
+![An Agent card reading "bob's. Sign in as bob to run this one — the backend refuses anyone else, whoever the browser claims to be"](docs/assets/mw-ownership.jpg)
+
+A fan-out's Agents are not interchangeable, so each card says who it acts for,
+which section of the shared file it is confined to, and what it has spent.
+
+### The merge gate, and what it is waiting for
+
+![The board showing "The merge stays closed until every Agent is approved and no document is contested — 2 still to approve", with Merge all work disabled](docs/assets/mw-merge-gate.jpg)
+
+**Merge all work** stays disabled until every Agent has been approved *by its own
+human* and no document is contested. The orchestrator combines the result; it
+never had authority over any of the workspaces it is combining.
+
+### Every decision, in one hash-linked chain
+
+![The decision chain panel listing sequenced Allow and Deny entries with their rule ids and reasons](docs/assets/mw-decision-chain.jpg)
+
+Allow and deny alike, in order, each carrying the rule that decided it and
+linked `prevHash → hash` — so afterwards you can prove what was permitted rather
+than asking a log to be believed.
 
 ## Features
 

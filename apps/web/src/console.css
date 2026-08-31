@@ -568,11 +568,26 @@
 /* ---------------------------------------------------------------- misc */
 
 .console-error {
-  padding: 8px 26px;
+  /* `.workbench` is a grid with named template areas and this element has none,
+     so it was auto-placed into an implicit row BELOW the status bar and squeezed
+     into the 48px activity-bar column - a refusal rendered one word per line,
+     which is the one message in this app that has to be readable. Float it over
+     the workbench instead: legible, and it reflows nothing. */
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 70;
+  width: max-content;
+  max-width: min(720px, calc(100vw - 96px));
+  border: 1px solid var(--con-deny-line);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(8, 12, 20, 0.34);
+  padding: 10px 16px;
   background: var(--con-deny-bg-2);
-  border-bottom: 1px solid var(--con-deny-line);
   color: var(--deny);
-  font-size: 11.5px;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .run-report {
