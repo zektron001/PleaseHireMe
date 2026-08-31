@@ -85,12 +85,29 @@ function runLane(lane) {
     // dependency, a syntax error in a test file. That is a broken lane, not a
     // lane with findings, and the two must not be reported the same way.
     process.stderr.write("could not run\n");
-    return { ...lane, broken: true, total: 0, passed: 0, failed: 0, failures: [] };
+    return { ...lane, broken: true, total: 0, passed: 0, failed: 0, failures: [], unrunnable: [] };
   }
 
   const failures = [];
+  /**
+   * A file that never loaded - a bad import, a syntax error - is recorded as a
+   * failed suite carrying a message and zero assertions. Counting only
+   * assertions makes it vanish: the totals shrink by however many tests it
+   * held and nothing says so, which is the most dangerous shape a test report
+   * can take. It is not a finding either; a finding is a test that ran and
+   * disagreed with the docs. It gets its own section and always fails the run.
+   */
+  const unrunnable = [];
   for (const file of report.testResults ?? []) {
-    for (const test of file.assertionResults ?? []) {
+    const tests = file.assertionResults ?? [];
+    if (file.status === "failed" && tests.length === 0) {
+      unrunnable.push({
+        file: (file.name ?? "").replace(ROOT + "/", ""),
+        message: (file.message ?? "(no message)").split("\n")[0].trim(),
+      });
+      continue;
+    }
+    for (const test of tests) {
       if (test.status !== "failed") continue;
       failures.push({
         file: (file.name ?? "").replace(ROOT + "/", ""),
@@ -114,13 +131,20 @@ function runLane(lane) {
     failed: report.numFailedTests ?? 0,
     files: (report.testResults ?? []).length,
     failures,
+    unrunnable,
   };
-  process.stderr.write(lastRun.passed + "/" + lastRun.total + " passed\n");
+  process.stderr.write(
+    lastRun.passed + "/" + lastRun.total + " passed" +
+    (unrunnable.length > 0 ? "  (" + unrunnable.length + " file(s) never loaded)" : "") + "\n",
+  );
   return lastRun;
 }
 
 function verdict(lane) {
   if (lane.broken) return "**could not run**";
+  if (lane.unrunnable.length > 0) {
+    return "**" + lane.unrunnable.length + " file(s) never loaded**";
+  }
   if (lane.gate === "green") return lane.failed === 0 ? "green" : "**REGRESSION**";
   return lane.failed === 0 ? "no findings" : lane.failed + " findings";
 }
@@ -148,6 +172,9 @@ function markdown(lanes) {
   out.push("| Node | `" + process.version + "` |");
   out.push("| Regressions | " + (regressions === 0 ? "none" : "**" + regressions + "**") + " |");
   out.push("| Audit findings | " + findings + " |");
+  const stranded = lanes.reduce((sum, lane) => sum + lane.unrunnable.length, 0);
+  out.push("| Suites that never loaded | " +
+    (stranded === 0 ? "none" : "**" + stranded + "**") + " |");
   out.push("");
   out.push("## Lanes");
   out.push("");
@@ -180,6 +207,21 @@ function markdown(lanes) {
       }
       out.push("- **" + failure.name + "**");
       out.push("  <br>`" + failure.message.replace(/`/g, "'") + "`");
+    }
+    out.push("");
+  }
+
+  for (const lane of lanes) {
+    if (lane.unrunnable.length === 0) continue;
+    out.push("## " + lane.title + " - " + lane.unrunnable.length + " suite(s) that never loaded");
+    out.push("");
+    out.push("These files did not run at all, so the totals above understate what");
+    out.push("is untested by however many tests they hold. This is a broken suite,");
+    out.push("not a finding, and it fails the run in either lane.");
+    out.push("");
+    for (const entry of lane.unrunnable) {
+      out.push("- `" + entry.file + "`");
+      out.push("  <br>`" + entry.message.replace(/`/g, "'") + "`");
     }
     out.push("");
   }
@@ -218,6 +260,8 @@ if (broken.length > 0) {
   console.error("Lane could not run: " + broken.map((lane) => lane.key).join(", "));
   process.exit(2);
 }
-// Audit red is the audit working. Only a baseline failure fails this command.
+// Audit red is the audit working. A baseline failure is not, and neither is a
+// suite that never loaded - that one hides tests rather than reporting them.
 const regressed = results.filter((lane) => lane.gate === "green" && lane.failed > 0);
-process.exit(regressed.length > 0 ? 1 : 0);
+const stranded = results.filter((lane) => lane.unrunnable.length > 0);
+process.exit(regressed.length > 0 || stranded.length > 0 ? 1 : 0);
