@@ -106,7 +106,24 @@ describe("scripts/run-server.sh starts the server on the bash macOS ships", () =
     // happy and there is nothing to guard.
     expect(script, "run-server.sh no longer sets -u").toMatch(/set -[a-z]*u[a-z]* /);
 
-    const emptyArrays = [...script.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)=\(\s*\)\s*$/gm)].map(
+    /**
+     * Comments are not code, and this test could not tell the difference.
+     *
+     * The fix for this very finding added a line explaining itself:
+     *
+     *   # Expanded below as ${env_flag[@]+"${env_flag[@]}"} rather than "${env_flag[@]}".
+     *
+     * That sentence contains one more bare form than guarded form, so the
+     * arithmetic below counted it as an unguarded expansion and the finding
+     * survived its own fix. The assertion is unchanged - no bare expansion in
+     * the script's CODE - it simply now reads only the code.
+     */
+    const code = script
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+
+    const emptyArrays = [...code.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)=\(\s*\)\s*$/gm)].map(
       (match) => match[1] ?? "",
     );
     expect(emptyArrays.length, "expected run-server.sh to declare an empty array").toBeGreaterThan(
@@ -118,8 +135,8 @@ describe("scripts/run-server.sh starts the server on the bash macOS ships", () =
       // skipped entirely when the array is unset, so -u never sees it.
       const bare = new RegExp('"\\$\\{' + name + '\\[@\\]\\}"', "g");
       const guarded = new RegExp("\\$\\{" + name + "\\[@\\]\\+", "g");
-      const bareUses = [...script.matchAll(bare)].length;
-      const guardedUses = [...script.matchAll(guarded)].length;
+      const bareUses = [...code.matchAll(bare)].length;
+      const guardedUses = [...code.matchAll(guarded)].length;
 
       expect(
         bareUses - guardedUses,
