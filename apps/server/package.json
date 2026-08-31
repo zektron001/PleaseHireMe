@@ -8,11 +8,12 @@
     "dev": "../../scripts/run-server.sh dev",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude '**/*.perf.test.ts'",
     "test:audit": "vitest run security.test.ts contract.test.ts property.test.ts",
-    "test:baseline": "vitest run --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude '**/*.contract.test.ts' --exclude '**/*.property.test.ts' --exclude '**/security.test.ts' --exclude '**/client-contract.test.ts'",
+    "test:baseline": "vitest run --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude '**/*.perf.test.ts' --exclude '**/*.contract.test.ts' --exclude '**/*.property.test.ts' --exclude '**/security.test.ts' --exclude '**/client-contract.test.ts'",
     "test:fuzz": "FUZZ_RUNS=${FUZZ_RUNS:-20000} FUZZ_TIME_MS=${FUZZ_TIME_MS:-15000} vitest run property.test --testTimeout=0",
-    "start": "../../scripts/run-server.sh start"
+    "start": "../../scripts/run-server.sh start",
+    "test:perf": "vitest run perf.test --testTimeout=0"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

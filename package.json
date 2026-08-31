@@ -22,7 +22,8 @@
     "check": "npm run typecheck && npm run test && npm run build",
     "poc": "./scripts/start-local-poc.sh",
     "start": "npm run start -w @launchpad/server",
-    "demo:warrant": "tsx apps/server/src/warrant/demo.ts"
+    "demo:warrant": "tsx apps/server/src/warrant/demo.ts",
+    "test:perf": "npm run test:perf -w @launchpad/server"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

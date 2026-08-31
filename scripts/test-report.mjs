@@ -60,6 +60,20 @@ const LANES = [
     args: ["test", "-w", "@launchpad/web"],
   },
   {
+    key: "perf",
+    title: "Performance",
+    gate: "green",
+    blurb: "What does each guarantee cost, and is it the shape we think?",
+    /**
+     * Green, not findings. A budget here is a ceiling with real headroom, not
+     * a pinned number - it exists to catch an order-of-magnitude regression on
+     * somebody else's laptop, so a failure genuinely means something changed.
+     * The measurements themselves are written to artifacts/tests/perf.json and
+     * rendered below, because the number is the point and pass/fail is not.
+     */
+    args: ["run", "test:perf", "-w", "@launchpad/server"],
+  },
+  {
     key: "fuzz",
     title: "Fuzz campaign",
     gate: "findings",
@@ -83,6 +97,17 @@ const LANES = [
     args: ["run", "test:fuzz", "-w", "@launchpad/server"],
   },
 ];
+
+/** The performance lane writes its measurements here; absent is not an error. */
+function readMeasurements() {
+  try {
+    const raw = readFileSync(join(ROOT, "artifacts/tests/perf-measurements.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.sort((a, b) => a.name.localeCompare(b.name)) : [];
+  } catch {
+    return [];
+  }
+}
 
 function sh(command, args) {
   const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8" });
@@ -236,6 +261,44 @@ function markdown(lanes) {
     );
   }
   out.push("");
+
+  const perf = readMeasurements();
+  if (perf.length > 0) {
+    out.push("## Performance - what each guarantee costs");
+    out.push("");
+    out.push(
+      "Single machine, single process, on whatever hardware ran this. Useful " +
+      "for \"is this the shape we think it is\" and \"did this get an order of " +
+      "magnitude worse\". Not a production SLO: there is no network here, no " +
+      "container engine, and one Node process.",
+    );
+    out.push("");
+    out.push("| Measurement | p50 | p95 | max | Budget | |");
+    out.push("| --- | ---: | ---: | ---: | ---: | --- |");
+    for (const row of perf) {
+      const ms = (value) => value.toFixed(3) + "ms";
+      out.push(
+        "| `" + row.name + "` | " + ms(row.p50) + " | " + ms(row.p95) + " | " +
+        ms(row.max) + " | " + row.budgetMs + "ms | " +
+        (row.p95 < row.budgetMs ? "ok" : "**over**") + " |",
+      );
+    }
+    out.push("");
+    out.push("### What the numbers mean");
+    out.push("");
+    for (const row of perf) {
+      out.push("**`" + row.name + "`** - " + row.claim);
+      out.push("");
+      out.push("> " + row.justification);
+      out.push("");
+      out.push(
+        "<sub>" + row.runs + " runs after warm-up · p50 " + row.p50.toFixed(3) +
+        "ms · p95 " + row.p95.toFixed(3) + "ms · max " + row.max.toFixed(3) +
+        "ms · budget " + row.budgetMs + "ms</sub>",
+      );
+      out.push("");
+    }
+  }
 
   for (const lane of lanes) {
     // A seedless lane lists only what the deterministic lanes did not already

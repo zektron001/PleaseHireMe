@@ -24,3 +24,7 @@ vault/
 # vitest JSON beside it is run output and is not.
 artifacts/tests/*.json
 artifacts/tests/REPORT.partial.md
+
+# The performance lane writes here from whichever cwd invoked it; the file is
+# anchored to the repo root now, but a stray workspace copy is still possible.
+apps/*/artifacts/
