@@ -1,0 +1,249 @@
+/*
+ * The greeting overlay.
+ *
+ * Scoped under .hello, like tour.css, so nothing leaks into the workbench.
+ * It reuses --ink, --muted, --paper and --ui-font, and adds three tokens of
+ * its own because the workbench has no name for what this needs: the warm
+ * ground it sits on and the two ends of the ink gradient. Everything warm
+ * here is warm on purpose - the rest of the product is a cool grey IDE, and
+ * this one moment is the exception that makes it feel addressed to a person.
+ *
+ * Theming follows the same three-state shape as tour.css: a bare :root for
+ * light, a prefers-color-scheme block guarded by :not([data-theme="light"]),
+ * and an explicit :root[data-theme="dark"]. No colour is defined only inside
+ * a dark block.
+ */
+
+/*
+ * The greeting is written in the person's OWN colour - the same hue the file
+ * tab, the caret and the activity feed already use for them (participants.ts).
+ * Alice is greeted in amber, Bob in green, and each recognises themselves
+ * before reading a word.
+ *
+ * Only the hue crosses the boundary. The component sets --hello-hue and
+ * nothing else; every lightness and alpha below is chosen per theme, so a
+ * hue that is legible on cream is still legible on near-black. Setting a
+ * finished colour inline instead would have to pick one theme and be wrong in
+ * the other.
+ *
+ * These are declared on .hello rather than :root on purpose: a custom
+ * property that references another one is substituted on the element it is
+ * declared on, so the inline --hello-hue and the tokens built from it have to
+ * meet on the same element.
+ */
+
+.hello {
+  /* 32 is amber - the fallback for a greeting with nobody to colour it. */
+  --hello-hue: 32;
+  --hello-ground: radial-gradient(
+    120% 90% at 50% 38%,
+    hsl(var(--hello-hue) 72% 98%) 0%,
+    hsl(var(--hello-hue) 64% 94%) 45%,
+    hsl(var(--hello-hue) 52% 88%) 100%
+  );
+  --hello-ink-a: hsl(var(--hello-hue) 84% 45%);
+  --hello-ink-b: hsl(var(--hello-hue) 86% 36%);
+  --hello-glow: hsl(var(--hello-hue) 90% 55% / 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hello {
+    --hello-ground: radial-gradient(
+      120% 90% at 50% 38%,
+      hsl(var(--hello-hue) 28% 13%) 0%,
+      hsl(var(--hello-hue) 24% 10%) 45%,
+      hsl(var(--hello-hue) 18% 6%) 100%
+    );
+    --hello-ink-a: hsl(var(--hello-hue) 92% 62%);
+    --hello-ink-b: hsl(var(--hello-hue) 86% 56%);
+    --hello-glow: hsl(var(--hello-hue) 92% 60% / 0.18);
+  }
+}
+
+:root[data-theme="dark"] .hello {
+  --hello-ground: radial-gradient(
+    120% 90% at 50% 38%,
+    hsl(var(--hello-hue) 28% 13%) 0%,
+    hsl(var(--hello-hue) 24% 10%) 45%,
+    hsl(var(--hello-hue) 18% 6%) 100%
+  );
+  --hello-ink-a: hsl(var(--hello-hue) 92% 62%);
+  --hello-ink-b: hsl(var(--hello-hue) 86% 56%);
+  --hello-glow: hsl(var(--hello-hue) 92% 60% / 0.18);
+}
+
+.hello {
+  position: fixed;
+  inset: 0;
+  z-index: 100001; /* above the tour: this is the first thing, always */
+  display: grid;
+  place-items: center;
+  font-family: var(--ui-font, Inter, ui-sans-serif, system-ui, sans-serif);
+  background: var(--hello-ground);
+  animation: hello-ground-in 900ms ease-out both;
+}
+
+/* A slow, barely-there breath behind the writing. Warmth you notice only if
+   you look for it - which is the point. */
+.hello__warmth {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(50% 40% at 50% 42%, var(--hello-glow) 0%, transparent 70%);
+  animation: hello-breathe 7s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.hello__stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 0 24px;
+  text-align: center;
+}
+
+.hello__mark {
+  width: min(56vw, 460px);
+  height: auto;
+  overflow: visible;
+}
+
+.hello__stroke {
+  fill: none;
+  stroke: var(--hello-ink-a);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 2px 10px var(--hello-glow));
+  animation: hello-write 2600ms cubic-bezier(0.62, 0.02, 0.38, 1) forwards;
+}
+
+/* Reduced motion: the finished hand, arriving rather than being drawn. */
+.hello[data-reduced="1"] .hello__stroke {
+  animation: hello-appear 320ms ease-out both;
+}
+
+@keyframes hello-write {
+  from {
+    stroke-dashoffset: var(--hello-length);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes hello-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The name and the line under it wait for the hand to finish, then rise a
+   few pixels. Nothing moves far; it should read as settling, not sliding. */
+.hello__headline,
+.hello__subtitle,
+.hello__continue {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 900ms ease-out,
+    transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hello__headline {
+  margin: 4px 0 0;
+  font-size: clamp(22px, 3.2vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.hello__subtitle {
+  margin: 10px 0 0;
+  max-width: 34ch;
+  font-size: clamp(13px, 1.4vw, 15px);
+  line-height: 1.6;
+  color: var(--muted);
+  transition-delay: 180ms;
+}
+
+.hello__continue {
+  margin-top: 30px;
+  padding: 9px 22px;
+  border: 1px solid color-mix(in srgb, var(--hello-ink-b) 32%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hello-ink-b);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    opacity 900ms ease-out,
+    transform 900ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease-out;
+  transition-delay: 360ms;
+}
+
+.hello__continue:hover {
+  background: color-mix(in srgb, var(--hello-ink-a) 10%, transparent);
+}
+
+.hello__continue:focus-visible {
+  outline: 2px solid var(--hello-ink-b);
+  outline-offset: 3px;
+}
+
+/* Stage gates. Each stage only reveals; nothing is ever taken back. */
+.hello[data-stage="named"] .hello__headline,
+.hello[data-stage="settled"] .hello__headline,
+.hello[data-stage="settled"] .hello__subtitle,
+.hello[data-stage="settled"] .hello__continue {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes hello-ground-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hello-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+/*
+ * The breathing glow and the long rises are motion. Under a reduced-motion
+ * preference the ground still warms and the words still fade, but nothing
+ * travels and nothing loops.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .hello__warmth {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .hello__headline,
+  .hello__subtitle,
+  .hello__continue {
+    transform: none;
+    transition:
+      opacity 260ms ease-out,
+      background-color 160ms ease-out;
+  }
+}
