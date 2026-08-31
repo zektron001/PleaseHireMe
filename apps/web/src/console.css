@@ -2687,3 +2687,25 @@
 .screen-monaco[data-empty="true"] {
   display: none;
 }
+
+/* Whose Agent this is. The point of the fan-out is that these are not
+   interchangeable, so the card says it before you click the wrong one. */
+.agent-owner {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  border-left: 2px solid var(--rule-strong);
+  padding-left: 8px;
+}
+.agent-owner.is-mine {
+  color: var(--fg);
+  border-left-color: var(--accent, #2f6df6);
+}
+.agent-owner b { font-weight: 650; }
+
+.button-foreign {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--rule-strong);
+}

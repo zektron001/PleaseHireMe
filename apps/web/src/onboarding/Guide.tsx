@@ -68,6 +68,9 @@ export function nextStep(state: GuideState): GuideStep | null {
   }
 
   const agents = session.agents ?? [];
+  const mine = agents.find((a) => a.mine);
+  const theirs = agents.find((a) => !a.mine);
+  const ownerOf = (id: string) => id.replace(/^human:/, "");
   const anyRunning = (session.running ?? 0) > 0;
   const ranOnce = agents.some((a) => a.turns > 0);
   const allSubmitted =
@@ -119,10 +122,15 @@ export function nextStep(state: GuideState): GuideStep | null {
     return {
       id: "run",
       target: "run-task",
-      title: "Run an Agent",
-      body:
-        'Press "▶ Run task" on a card. You can only run the Agent that acts for you — ' +
-        "try the other one and the backend refuses it.",
+      title: mine ? "Run your Agent: " + mine.title : "This Agent is not yours to run",
+      body: mine
+        ? 'Press "▶ Run task" on the card marked Yours — "' + mine.title + '".' +
+          (theirs
+            ? ' The other card is ' + ownerOf(theirs.ownerId) + "'s; running it is refused."
+            : "")
+        : "Every Agent here acts for someone else. Sign in as " +
+          (theirs ? ownerOf(theirs.ownerId) : "the other human") +
+          " at the top right to run theirs.",
       why: "Same button, different principal, different answer.",
     };
   }
@@ -143,9 +151,14 @@ export function nextStep(state: GuideState): GuideStep | null {
       id: "approve",
       target: "approve-agent",
       title: "Every Agent is finished — approve their work",
-      body:
-        'Press "Approve" on each card. Only the human an Agent acts for may approve it, ' +
-        "so sign in as the other person for theirs.",
+      body: mine
+        ? 'Press "Approve" on your card ("' + mine.title + '").' +
+          (theirs
+            ? " Then sign in as " + ownerOf(theirs.ownerId) + " to approve theirs."
+            : "")
+        : "Sign in as " +
+          (theirs ? ownerOf(theirs.ownerId) : "each owner") +
+          " to approve their own Agent's work.",
       why: "The merge stays shut until every Agent is approved.",
     };
   }
