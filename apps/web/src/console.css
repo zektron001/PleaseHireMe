@@ -2691,7 +2691,13 @@
 /* Whose Agent this is. The point of the fan-out is that these are not
    interchangeable, so the card says it before you click the wrong one. */
 .agent-owner {
-  margin: 0 0 6px;
+  /* `.agent-card` is a three-column grid in styles.css (34px | 1fr | 8px), so a
+     plain child lands in the 8px column and renders one character per line.
+     Span the row instead - harmless where the card is a flex column. */
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin: 0 12px 6px;
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--muted);
@@ -2708,4 +2714,20 @@
   background: transparent;
   color: var(--muted);
   border: 1px dashed var(--rule-strong);
+}
+
+/* styles.css styles an older, unrelated `.agent-card` as a three-column grid
+   (34px | 1fr | 8px) and is loaded after this file, so it won the cascade and
+   every child of the BOARD card was being placed in a column meant for
+   something else - the description rendered one character wide down the side.
+   Scoping by the board's own container beats it on specificity without
+   touching the other card. */
+.agent-grid > .agent-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  cursor: default;
+  width: auto;
 }
