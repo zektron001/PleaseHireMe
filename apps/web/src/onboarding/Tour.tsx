@@ -185,7 +185,13 @@ export function Tour({
 }): JSX.Element | null {
   const [stepIndex, setStepIndex] = useState(0);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<Point | null>(null);
+  /**
+   * Tagged with the step it was measured for. Each step has a different card
+   * height, so a position carried over from the previous step is wrong, not
+   * merely stale - `placed` below discards it rather than showing the card in
+   * the last step's spot for a frame.
+   */
+  const [pos, setPos] = useState<(Point & { step: number }) | null>(null);
 
   // Every open is a fresh run of the tour, not a resume of wherever it was
   // left - a dev button (or later, first run) always starts at chapter one.
@@ -210,12 +216,13 @@ export function Tour({
       if (!cardEl) return;
       const size = { width: cardEl.offsetWidth, height: cardEl.offsetHeight };
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      setPos(rect ? placeCard(rect, size, viewport) : centerOf(size, viewport));
+      const point = rect ? placeCard(rect, size, viewport) : centerOf(size, viewport);
+      setPos({ ...point, step: stepIndex });
     };
     compute();
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
-  }, [rect, resolved]);
+  }, [rect, resolved, stepIndex]);
 
   const total = TOUR_STEPS.length;
   const isFirst = stepIndex === 0;
@@ -254,12 +261,15 @@ export function Tour({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose, next, back, isLast]);
 
+  /** The position, but only while it still belongs to the step on screen. */
+  const placed = pos && pos.step === stepIndex ? pos : null;
+
   // Land keyboard focus on the card itself each step, rather than leaving it
   // wherever the workbench last had it - `tabIndex={-1}` makes a plain div a
   // valid, programmatic focus target without also making it tab-reachable.
   useEffect(() => {
-    if (open && pos) cardRef.current?.focus();
-  }, [open, pos, stepIndex]);
+    if (open && placed) cardRef.current?.focus();
+  }, [open, placed, stepIndex]);
 
   if (!open || !step) return null;
 
@@ -280,73 +290,83 @@ export function Tour({
         <div className="tour-scrim" />
       )}
 
-      {pos && (
-        <div
-          key={step.id}
-          className="tour-card"
-          style={{ top: pos.top, left: pos.left }}
-          ref={cardRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label={step.title}
-          aria-live="polite"
-          tabIndex={-1}
-        >
-          <button className="tour-close" onClick={onClose} aria-label="Close tour">
-            <span aria-hidden="true">×</span>
-          </button>
+      {/*
+        Always mounted, never gated on `pos`. The card's own measured size is
+        what `placeCard` needs before it can produce a position, and the ref
+        that measures it only exists once the card is in the DOM - so gating
+        the card on `pos` is a circle that never closes and the tour renders a
+        spotlight with nothing next to it. Hiding it for the single frame
+        before the first measurement is what breaks the circle.
+      */}
+      <div
+        key={step.id}
+        className="tour-card"
+        style={
+          placed
+            ? { top: placed.top, left: placed.left }
+            : { top: 0, left: 0, visibility: "hidden" }
+        }
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={step.title}
+        aria-live="polite"
+        tabIndex={-1}
+      >
+        <button className="tour-close" onClick={onClose} aria-label="Close tour">
+          <span aria-hidden="true">×</span>
+        </button>
 
-          <div className="tour-chapter">
-            <div className="tour-dots" aria-hidden="true">
-              {([1, 2, 3, 4] as const).map((chapter) => (
-                <span
-                  key={chapter}
-                  className="tour-dot"
-                  data-state={
-                    chapter < step.chapter ? "done" : chapter === step.chapter ? "active" : "upcoming"
-                  }
-                />
-              ))}
-            </div>
-            <span>
-              Chapter {step.chapter} of 4 · {step.chapterTitle}
-            </span>
-          </div>
-
-          <h2 className="tour-title">{step.title}</h2>
-          {step.body.map((paragraph, index) => (
-            <p className="tour-body" key={step.id + "-p" + index}>
-              {paragraph}
-            </p>
-          ))}
-
-          <div className="tour-progress">
-            <div className="tour-progress-bar">
-              <div
-                className="tour-progress-fill"
-                style={{ width: ((stepIndex + 1) / total) * 100 + "%" }}
+        <div className="tour-chapter">
+          <div className="tour-dots" aria-hidden="true">
+            {([1, 2, 3, 4] as const).map((chapter) => (
+              <span
+                key={chapter}
+                className="tour-dot"
+                data-state={
+                  chapter < step.chapter ? "done" : chapter === step.chapter ? "active" : "upcoming"
+                }
               />
-            </div>
-            <span className="tour-progress-text">
-              {stepIndex + 1} of {total}
-            </span>
+            ))}
           </div>
+          <span>
+            Chapter {step.chapter} of 4 · {step.chapterTitle}
+          </span>
+        </div>
 
-          <div className="tour-footer">
-            <button className="tour-skip" onClick={onClose}>
-              Skip tour
+        <h2 className="tour-title">{step.title}</h2>
+        {step.body.map((paragraph, index) => (
+          <p className="tour-body" key={step.id + "-p" + index}>
+            {paragraph}
+          </p>
+        ))}
+
+        <div className="tour-progress">
+          <div className="tour-progress-bar">
+            <div
+              className="tour-progress-fill"
+              style={{ width: ((stepIndex + 1) / total) * 100 + "%" }}
+            />
+          </div>
+          <span className="tour-progress-text">
+            {stepIndex + 1} of {total}
+          </span>
+        </div>
+
+        <div className="tour-footer">
+          <button className="tour-skip" onClick={onClose}>
+            Skip tour
+          </button>
+          <div className="tour-nav">
+            <button className="tour-back" onClick={back} disabled={isFirst}>
+              Back
             </button>
-            <div className="tour-nav">
-              <button className="tour-back" onClick={back} disabled={isFirst}>
-                Back
-              </button>
-              <button className="tour-next" onClick={isLast ? onClose : next}>
-                {isLast ? "Finish" : "Next"}
-              </button>
-            </div>
+            <button className="tour-next" onClick={isLast ? onClose : next}>
+              {isLast ? "Finish" : "Next"}
+            </button>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
