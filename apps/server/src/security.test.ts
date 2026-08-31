@@ -23,7 +23,8 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
 import { WarrantPlane } from "./warrant/index.js";
-import { workspaceResource } from "./warrant/resources.js";
+import { covers, workspaceResource } from "./warrant/resources.js";
+import { docResource } from "./concord/store.js";
 
 /** Long enough that loadConfig accepts it even on a non-loopback production host. */
 const DEMO_CREDENTIAL = "security-suite-baseline-credential";
@@ -550,6 +551,30 @@ describe("a warrant grants exactly what it names (WB-5)", () => {
       },
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  /**
+   * The sharing feature reaches the same prefix by a second road.
+   *
+   * `docResource` strips leading slashes, so any docId made only of them
+   * collapses to the bare "repo:" prefix - and `covers()` reads that prefix as
+   * the entire repository (`g === ""` returns true for every resource). The
+   * route's own validation does not stop it: `docParams` is
+   * `z.string().trim().min(1).max(300)`, which "/" satisfies.
+   *
+   * This is asserted on the mapping rather than through a full share, because
+   * driving it end to end needs a sharer who already holds the root - i.e. the
+   * defect above - and a test that needs one bug to demonstrate another proves
+   * neither. What matters here is that the share path has no separate guard:
+   * the day anything hands out the root, sharing "/" hands over the whole repo
+   * under a name that reads like a single document.
+   */
+  it("never maps a shareable docId onto the bare whole-repo prefix (WB-5)", () => {
+    for (const docId of ["/", "//", "   /   "]) {
+      const resource = docResource(docId.trim());
+      expect(resource).not.toBe("repo:");
+      expect(covers(resource, "repo:secrets/keys.txt")).toBe(false);
+    }
   });
 
   it("does not let an agent reach a repo path outside its subtask's paths", async () => {
