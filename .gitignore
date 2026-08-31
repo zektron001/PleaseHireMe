@@ -18,3 +18,4 @@ deploy/volcengine/terraform.tfvars
 
 # AEGIS protected asset (Track C). Never commit the demo vault.
 vault/
+.gstack/
