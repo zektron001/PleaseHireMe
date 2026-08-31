@@ -35,8 +35,16 @@ import type {
   Subtask,
 } from "./types";
 import { ReviewPanel } from "./Review";
+import type {
+  AgentRouting,
+  SectionAllocation,
+  SessionAgent,
+  WorkspaceFrame,
+} from "./types";
 import { type Selection } from "./Code";
-import { CodeEditor } from "./editor/CodeEditor";
+import { CodeEditor, type SaveOutcome } from "./editor/CodeEditor";
+import { AgentBoard, ConsultConfirm } from "./Agents";
+import { LiveScreens } from "./Screens";
 import {
   AccessPanel,
   AgentLive,
@@ -186,7 +194,9 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [live, setLive] = useState<ActivityEvent[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [session, setSession] = useState<string | null>(null);
-  const [view, setView] = useState<"dashboard" | "workspace" | "chat">("dashboard");
+  const [view, setView] = useState<
+    "dashboard" | "workspace" | "chat" | "orchestration" | "screens"
+  >("dashboard");
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [sharing, setSharing] = useState(false);
   const tour = useTour();
@@ -204,6 +214,12 @@ export default function Console({ onExit }: { onExit: () => void }) {
     mode: ">",
   });
   const [selection, setSelection] = useState<Selection | null>(null);
+  /** Which Agent owns which heading, so the editor can band the document. */
+  const [allocations, setAllocations] = useState<SectionAllocation[]>([]);
+  const [routing, setRouting] = useState<AgentRouting | null>(null);
+  const [frames, setFrames] = useState<WorkspaceFrame[]>([]);
+  /** Auto mode starts every idle Agent as soon as the board says one is. */
+  const [auto, setAuto] = useState(false);
   const [anchorLine, setAnchorLine] = useState<number | null>(null);
   const [question, setQuestion] = useState("");
   const [consultations, setConsultations] = useState<Consultation[]>([]);
@@ -274,12 +290,37 @@ export default function Console({ onExit }: { onExit: () => void }) {
     closeStream.current = api.stream((event) => {
       setLive((current) => [event, ...current].slice(0, 200));
     });
+    // A second stream, because a workspace frame carries a WHOLE FILE.
+    // Interleaving them with the one-line rows a human reads would push real
+    // events off the board within a couple of turns.
+    const closeFrames = api.workspaceStream((frame) => {
+      setFrames((current) => [
+        frame,
+        ...current.filter(
+          (other) => other.agentId !== frame.agentId || other.docId !== frame.docId,
+        ),
+      ]);
+    });
     return () => {
       closeStream.current?.();
       closeStream.current = null;
+      closeFrames();
       setStreaming(false);
     };
   }, [me]);
+
+  /**
+   * Auto mode. Starts anything idle each time the board reports it, which is
+   * the same route the Run all button uses - "auto" describes who pressed
+   * start, not what runs.
+   */
+  useEffect(() => {
+    if (!auto || busy) return;
+    const current = board?.sessions.find((entry) => entry.id === session);
+    if (!current || current.running > 0) return;
+    if (!current.agents.some((agent) => agent.mine && agent.state === "assigned")) return;
+    void api.autorun(current.id).catch(() => undefined);
+  }, [auto, board, session, busy]);
 
   // Poll: documents, the chain, the open document, and the collaboration board.
   // Cheap, and it means two browsers side by side show the same race the Agents
@@ -292,6 +333,16 @@ export default function Console({ onExit }: { onExit: () => void }) {
         api.board().catch(() => null),
       ]);
       if (events) setChain(events);
+      // The live screens' fallback. The pushed stream below is the fast path;
+      // this keeps the panes right if it drops.
+      void api
+        .workspaces()
+        .then((result) => {
+          if (result.frames.length > 0) {
+            setFrames((current) => (current.length === 0 ? result.frames : current));
+          }
+        })
+        .catch(() => undefined);
       if (live) {
         setBoard(live);
         // The stream is the fast path; the board is the one that is always
@@ -315,6 +366,9 @@ export default function Console({ onExit }: { onExit: () => void }) {
         setDoc(await api.doc(target, myAgent));
         setBlame(await api.blame(target, myAgent).catch(() => null));
         setReview(await api.reviewState(target, myAgent).catch(() => null));
+        setAllocations(
+          await api.sections(target, myAgent).then((r) => r.allocations).catch(() => []),
+        );
         setConsultations(
           await api
             .consultations(target)
@@ -407,13 +461,116 @@ export default function Console({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const ask = async () => {
+  /**
+   * The human write path the editor seam was left open for.
+   *
+   * PUT, not the Agent write route EDITOR_SEAM.md names, and the reason is
+   * section allocation: writing as `myAgent` would put the human inside that
+   * Agent's allocated heading and CONCORD would refuse every line outside it.
+   * The human owns the whole file. `writeAsHuman` takes no warrant (a warrant
+   * is a delegation FROM this human), ignores allocations, and does not merge -
+   * an interactive edit either applies to the revision you were looking at or
+   * you are told it moved. There is still exactly one Agent write path; this is
+   * simply not one.
+   */
+  const saveDoc = useCallback(
+    async (content: string, expectedVersion: number): Promise<SaveOutcome> => {
+      if (!selected) return { status: "denied", reason: "No document open" };
+      try {
+        const { outcome } = await api.saveDoc(selected, {
+          expectedVersion,
+          content,
+          message: "edited by hand",
+        });
+        void refresh();
+        if (outcome.status === "written") {
+          return {
+            status: "written",
+            version: outcome.version ?? expectedVersion + 1,
+            content: outcome.content ?? content,
+          };
+        }
+        return { status: "denied", reason: "The document moved - reopen it" };
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 409) {
+          return { status: "denied", reason: "The document moved - reopen it" };
+        }
+        return {
+          status: "denied",
+          reason: cause instanceof Error ? cause.message : String(cause),
+        };
+      }
+    },
+    [selected, refresh],
+  );
+
+  const stopSubtask = (agent: SessionAgent) =>
+    void guardAction("stop:" + agent.subtaskId, () => api.stopSubtask(agent.subtaskId));
+  const approveSubtask = (agent: SessionAgent) =>
+    void guardAction("approve:" + agent.subtaskId, () => api.approve(agent.subtaskId));
+  const runAgent = (agent: SessionAgent) =>
+    void guardAction("run:" + agent.subtaskId, () =>
+      api.runSubtask(
+        agent.subtaskId,
+        agent.section
+          ? [
+              "Edit " + agent.sectionDoc + " and nothing else.",
+              'Work ONLY inside the section headed "' + agent.section + '".',
+              "Replace its placeholder line with your real contribution to: " +
+                agent.description,
+              "",
+              "Rules:",
+              "- Use apply_patch to make the edit. Do not run find, ls, sed or grep.",
+              "- Read the file once if you need to; it is at a relative path.",
+              "- Never use an absolute path, and never write outside this file.",
+              "- Do not change any other section. The middleware will refuse it.",
+            ].join("\n")
+          : agent.description,
+      ),
+    );
+
+  /** Runs an action, surfaces whatever the middleware said, and refreshes. */
+  const guardAction = async (key: string, run: () => Promise<unknown>) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await run();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+      void refresh();
+    }
+  };
+
+  /**
+   * Who wrote the selected lines. Selecting them already tells the platform,
+   * so asking a human to retype an Agent id was making them do the platform's
+   * job - and getting it wrong returned a 400.
+   */
+  const lastRouted = useRef("");
+  useEffect(() => {
+    if (!selection || !selected || !myAgent) {
+      setRouting(null);
+      return;
+    }
+    const key = selected + ":" + selection.start + ":" + selection.end;
+    if (key === lastRouted.current) return;
+    lastRouted.current = key;
+    void api
+      .routeFor(selected, myAgent, selection.start, selection.end)
+      .then(setRouting)
+      .catch(() => setRouting(null));
+  }, [selection, selected, myAgent]);
+
+  const ask = async (targetAgentId?: string) => {
     if (!selected || !myAgent || !selection || !question.trim()) return;
     setAsking(true);
     try {
       await api.consult({
         docId: selected,
         agentId: myAgent,
+        ...(targetAgentId ? { targetAgentId } : {}),
         startLine: selection.start,
         endLine: selection.end,
         question: question.trim(),
@@ -601,6 +758,36 @@ export default function Console({ onExit }: { onExit: () => void }) {
         title: "Go to Sessions Dashboard",
         category: "Go",
         run: () => setView("dashboard"),
+      },
+      {
+        id: "workbench.orchestration",
+        title: "Go to Agents on This Task",
+        category: "Go",
+        run: () => setView("orchestration"),
+      },
+      {
+        id: "workbench.screens",
+        title: "Go to Live Screens",
+        category: "Go",
+        run: () => setView("screens"),
+      },
+      {
+        id: "task.runAll",
+        title: "Run All Idle Agents",
+        category: "Agent",
+        run: () => {
+          const current = board?.sessions.find((entry) => entry.id === session);
+          if (current) void guardAction("autorun", () => api.autorun(current.id));
+        },
+      },
+      {
+        id: "task.merge",
+        title: "Merge All Work Into the Canonical File",
+        category: "Agent",
+        run: () => {
+          const current = board?.sessions.find((entry) => entry.id === session);
+          if (current) void guardAction("integrate", () => api.integrate(current.id));
+        },
       },
       {
         id: "agents.create",
@@ -1156,6 +1343,33 @@ export default function Console({ onExit }: { onExit: () => void }) {
                   </p>
                 </div>
               )
+            ) : view === "orchestration" ? (
+              <AgentBoard
+                session={board?.sessions.find((entry) => entry.id === session) ?? null}
+                busy={busy !== null}
+                auto={auto}
+                onRun={runAgent}
+                onStop={stopSubtask}
+                onApprove={approveSubtask}
+                onFocus={() => setView("screens")}
+                onAutorun={() => {
+                  const current = board?.sessions.find((entry) => entry.id === session);
+                  if (current) void guardAction("autorun", () => api.autorun(current.id));
+                }}
+                onIntegrate={() => {
+                  const current = board?.sessions.find((entry) => entry.id === session);
+                  if (current) void guardAction("integrate", () => api.integrate(current.id));
+                }}
+                onToggleAuto={() => setAuto((value) => !value)}
+              />
+            ) : view === "screens" ? (
+              <LiveScreens
+                agents={board?.sessions.find((entry) => entry.id === session)?.agents ?? []}
+                frames={frames}
+                activity={live}
+                theme={resolvedTheme}
+                canonicalRev={doc?.version ?? 0}
+              />
             ) : view === "dashboard" ? (
               <Sessions
                 sessions={board?.sessions ?? []}
@@ -1163,9 +1377,11 @@ export default function Console({ onExit }: { onExit: () => void }) {
                 viewer={me?.id ?? null}
                 onOpen={(entry) => {
                   setSession(entry.id);
-                  setView("workspace");
                   const first = entry.docs[0]?.id;
                   if (first) setSelected(first);
+                  // Into the Agents board, not straight at the file: the first
+                  // question about a session is who is on it and what they own.
+                  setView("orchestration");
                 }}
               />
             ) : (
@@ -1178,6 +1394,20 @@ export default function Console({ onExit }: { onExit: () => void }) {
                       title="Back to sessions"
                     >
                       ▦
+                    </button>
+                    <button
+                      className="tab tab-back"
+                      onClick={() => setView("orchestration")}
+                      title="Agents on this task - run, stop, approve, merge"
+                    >
+                      ◈
+                    </button>
+                    <button
+                      className="tab tab-back"
+                      onClick={() => setView("screens")}
+                      title="Live screens - each Agent's own workspace copy"
+                    >
+                      ▶
                     </button>
                     {openTabs.map((tabId) => {
                       const entry = docs.find((item) => item.id === tabId);
@@ -1263,75 +1493,24 @@ export default function Console({ onExit }: { onExit: () => void }) {
                       comments={review?.comments ?? []}
                       conflicts={doc.conflicts ?? []}
                       onSelect={setSelection}
+                      onRequestSave={saveDoc}
                     />
 
                     {selection && (
-                      <div className="selection-bar">
-                        <span className="selection-range">
-                          Lines {selection.start}
-                          {selection.end !== selection.start ? "–" + selection.end : ""}
-                        </span>
-                        <input
-                          className="selection-question"
-                          value={question}
-                          placeholder="Ask the responsible Agent about these lines…"
-                          onChange={(event) => setQuestion(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") void ask();
-                          }}
-                        />
-                        <button
-                          className="button button-ghost"
-                          disabled={asking || !question.trim()}
-                          onClick={() => void ask()}
-                        >
-                          {asking ? "asking…" : "Ask Agent"}
-                        </button>
-                        <button
-                          className="ghost"
-                          onClick={() => {
-                            setSelection(null);
-                            setAnchorLine(null);
-                          }}
-                        >
-                          clear
-                        </button>
-                      </div>
-                    )}
-
-                    {consultations.length > 0 && (
-                      <div className="consults">
-                        <div className="review-head">
-                          <b>Consultations</b>
-                          <span className="review-count">
-                            explanation only — canonical content unchanged
-                          </span>
-                        </div>
-                        {consultations.slice(0, 4).map((item) => (
-                          <div className="consult" key={item.id}>
-                            <div className="consult-head">
-                              <span
-                                className="mono"
-                                style={{ color: colorOf(item.agentId) }}
-                              >
-                                {shortId(item.agentId)}
-                              </span>
-                              <span>
-                                L{item.startLine}
-                                {item.endLine !== item.startLine
-                                  ? "–" + item.endLine
-                                  : ""}
-                              </span>
-                              <span className={"state state-" + item.status}>
-                                {item.status}
-                              </span>
-                            </div>
-                            <p className="consult-q">{item.question}</p>
-                            {item.answer && <pre className="consult-a">{item.answer}</pre>}
-                            {item.error && <p className="review-warn">{item.error}</p>}
-                          </div>
-                        ))}
-                      </div>
+                      <ConsultConfirm
+                        routing={routing}
+                        range={selection}
+                        question={question}
+                        busy={asking}
+                        onQuestion={setQuestion}
+                        onAsk={(agentId) => void ask(agentId)}
+                        onPick={(agentId) => void ask(agentId)}
+                        onCancel={() => {
+                          setSelection(null);
+                          setRouting(null);
+                          setQuestion("");
+                        }}
+                      />
                     )}
 
                     <ReviewPanel

@@ -412,3 +412,42 @@ describe("the Track B invariant survives sharing", () => {
     expect(plane.audit.verify()).toBe(-1);
   });
 });
+
+describe("sharing survives a configured shared demo token", () => {
+  /**
+   * Regression, and the second time this exact defect has shipped. The shared
+   * `APP_AUTH_TOKEN` gate in app.ts exempts the prefixes whose routes carry a
+   * PER-HUMAN session token in the same header - one Authorization header
+   * cannot carry both - and `/api/share/` was never added to that list. So
+   * every sharing route 401'd the moment a token was configured, which is how
+   * the demo runs.
+   *
+   * The review routes had the identical bug and carry the identical test. Both
+   * were found by starting the server the way the demo starts it, not by the
+   * suite: every other test here runs with no shared token at all.
+   */
+  it("accepts a session token on every share route", async () => {
+    await app.close();
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: dir,
+      AGENT_WORKSPACE_ROOT: path.join(dir, "workspaces"),
+      CODEX_HOME: path.join(dir, "codex-home"),
+      AEGIS_ENABLED: "false",
+      APP_AUTH_TOKEN: "a-strong-shared-demo-token",
+    } as NodeJS.ProcessEnv);
+    app = await createApp(config, service, undefined, plane, runner);
+
+    const token = await login("alice");
+    const mine = await app.inject({
+      method: "GET",
+      url: "/api/share/mine",
+      headers: { authorization: "Bearer " + token },
+    });
+    expect(mine.statusCode).toBe(200);
+
+    // And a request with no identity at all is still refused.
+    const anonymous = await app.inject({ method: "GET", url: "/api/share/mine" });
+    expect(anonymous.statusCode).toBe(401);
+  });
+});

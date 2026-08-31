@@ -75,7 +75,15 @@ export async function createApp(
       request.url.startsWith("/api/warrant/") ||
       request.url.startsWith("/api/concord/") ||
       request.url.startsWith("/api/review/") ||
-      request.url.startsWith("/api/live/")
+      request.url.startsWith("/api/live/") ||
+      // Sharing is the same argument again, and it was missing: every
+      // /api/share route resolves a per-human session through the Registry,
+      // but the prefix was never exempted - so with APP_AUTH_TOKEN set the
+      // shared-token gate rejected the session token before requireHuman ever
+      // saw it, and the entire share dialog and shared-with-me inbox 401'd.
+      // The same defect the review routes had, found the same way: by starting
+      // the server the way the demo starts it.
+      request.url.startsWith("/api/share/")
     ) {
       return;
     }
