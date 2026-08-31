@@ -120,3 +120,37 @@ describe("Console", () => {
     expect(document.querySelector(".console-error")).not.toBeNull();
   });
 });
+
+/**
+ * The greeting is only worth anything if it actually reaches the screen. The
+ * component itself is covered in onboarding/hello.test.tsx; what is checked
+ * here is the wiring - that signing in mounts it, and that having been
+ * greeted once stops it coming back.
+ */
+describe("the first-run greeting", () => {
+  it("greets the human who just signed in", async () => {
+    localStorage.clear();
+    stubConsoleFetch();
+    render(<Console onExit={() => {}} />);
+
+    // The chip carries the avatar initials as well as the name, so match loosely.
+    const chip = await screen.findByRole("button", { name: /Alice/ });
+    fireEvent.click(chip);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.getAttribute("aria-label")).toMatch(/^Good (morning|afternoon|evening), Alice\.$/);
+  });
+
+  it("does not greet the same human twice", async () => {
+    localStorage.clear();
+    localStorage.setItem("launchpad.hello.seen." + ALICE.id, "1");
+    stubConsoleFetch();
+    render(<Console onExit={() => {}} />);
+
+    const chip = await screen.findByRole("button", { name: /Alice/ });
+    fireEvent.click(chip);
+
+    await waitFor(() => expect(chip.getAttribute("data-active")).toBe("true"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});

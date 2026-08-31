@@ -19,6 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { Human } from "../types";
+import { hueOf } from "../participants";
 import { greetingLines, markHelloSeen } from "./greeting";
 import "./hello.css";
 
@@ -120,6 +121,10 @@ export function Hello({ human, onDone, now }: HelloProps): JSX.Element {
       role="dialog"
       aria-modal="true"
       aria-label={headline}
+      // Written in their own colour - the same hue that marks them on every
+      // file tab and in every feed row. Only the hue crosses over; hello.css
+      // picks the lightness per theme.
+      style={{ ["--hello-hue" as string]: String(hueOf(human.id)) }}
     >
       <div className="hello__warmth" aria-hidden="true" />
       <div className="hello__stage">
