@@ -20,7 +20,16 @@ const aegis = config.aegisEnabled ? await Aegis.bootstrap(config) : undefined;
 // never learns the real upstream; without it, nothing changes from the baseline.
 await writeCodexConfig(
   config,
-  aegis?.egress ? config.aegisBrokerUrl : undefined,
+  // Two conditions, not one. The broker being up says the egress plane exists;
+  // `runtimeProvider` says whether the process that will dial it is inside the
+  // container network where AEGIS_BROKER_URL resolves AND where the per-run
+  // capability gets injected in place of the API key. Under `local-process`
+  // neither holds: the name does not resolve, so the turn hangs until the
+  // Codex timeout, and even pointed at loopback the broker refuses it as
+  // "Run capability is unknown". So a local turn talks to Ark directly.
+  aegis?.egress && config.runtimeProvider === "container"
+    ? config.aegisBrokerUrl
+    : undefined,
 );
 const runner = createRunner(config, aegis);
 // One chain for both planes, so an egress crossing and the authorization that

@@ -28,6 +28,7 @@ export function AgentCard({
 }): JSX.Element {
   const working = agent.state === "in_progress";
   const approved = agent.state === "approved" || agent.state === "integrated";
+  const owner = agent.ownerId.replace(/^human:/, "");
   return (
     <div className={"agent-card" + (working ? " is-working" : "")}>
       <div className="agent-top" style={{ background: colorOf(agent.agentId) }} />
@@ -43,6 +44,19 @@ export function AgentCard({
           {working ? "working" : agent.state}
         </span>
       </button>
+
+      <p className={"agent-owner" + (agent.mine ? " is-mine" : "")}>
+        {agent.mine ? (
+          <>
+            <b>Yours.</b> You hold the delegation behind this Agent, so you can run it.
+          </>
+        ) : (
+          <>
+            <b>{owner}&apos;s.</b> Sign in as {owner} to run this one — the backend
+            refuses anyone else, whoever the browser claims to be.
+          </>
+        )}
+      </p>
 
       <p className="agent-brief">{agent.description}</p>
 
@@ -78,8 +92,18 @@ export function AgentCard({
             ■ Stop
           </button>
         ) : (
-          <button className="button button-primary" data-guide="run-task" onClick={onRun} disabled={busy}>
-            ▶ Run task
+          <button
+            className={"button " + (agent.mine ? "button-primary" : "button-foreign")}
+            data-guide={agent.mine ? "run-task" : undefined}
+            onClick={onRun}
+            disabled={busy}
+            title={
+              agent.mine
+                ? "Run this Agent under your own warrant"
+                : "This Agent acts for " + owner + ". Running it is refused."
+            }
+          >
+            {agent.mine ? "▶ Run task" : "▶ Run (not yours)"}
           </button>
         )}
         <button
@@ -90,7 +114,9 @@ export function AgentCard({
           title={
             approved
               ? "Already approved"
-              : "Approve this Agent's work so the task can be merged"
+              : agent.mine
+                ? "Approve this Agent's work so the task can be merged"
+                : "Only " + owner + " may approve this one"
           }
         >
           {approved ? "✓ approved" : "Approve"}
