@@ -198,7 +198,6 @@ describe("the browser client and the server agree on the API", () => {
 
       // -- the agent runner and the CLI demo call these, not the console ---
       "POST /api/warrant/act", // PDP oracle, WARRANT_TRACK_B.md
-      "POST /api/warrant/subtasks/:p/submit", // runner callback
       "POST /api/warrant/subtasks/:p/approve", // integration gate
       "POST /api/warrant/tasks/:p/integrate", // demo.ts:224,247,264
       "POST /api/concord/docs/:p", // agents write docs; the console reads them
