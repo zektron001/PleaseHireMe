@@ -14,27 +14,62 @@
  * a dark block.
  */
 
-:root {
-  --hello-ground: radial-gradient(120% 90% at 50% 38%, #fffaf3 0%, #fdf3e6 45%, #f7e9d8 100%);
-  --hello-ink-a: #d97706;
-  --hello-ink-b: #b45309;
-  --hello-glow: rgba(217, 119, 6, 0.18);
+/*
+ * The greeting is written in the person's OWN colour - the same hue the file
+ * tab, the caret and the activity feed already use for them (participants.ts).
+ * Alice is greeted in amber, Bob in green, and each recognises themselves
+ * before reading a word.
+ *
+ * Only the hue crosses the boundary. The component sets --hello-hue and
+ * nothing else; every lightness and alpha below is chosen per theme, so a
+ * hue that is legible on cream is still legible on near-black. Setting a
+ * finished colour inline instead would have to pick one theme and be wrong in
+ * the other.
+ *
+ * These are declared on .hello rather than :root on purpose: a custom
+ * property that references another one is substituted on the element it is
+ * declared on, so the inline --hello-hue and the tokens built from it have to
+ * meet on the same element.
+ */
+
+.hello {
+  /* 32 is amber - the fallback for a greeting with nobody to colour it. */
+  --hello-hue: 32;
+  --hello-ground: radial-gradient(
+    120% 90% at 50% 38%,
+    hsl(var(--hello-hue) 72% 98%) 0%,
+    hsl(var(--hello-hue) 64% 94%) 45%,
+    hsl(var(--hello-hue) 52% 88%) 100%
+  );
+  --hello-ink-a: hsl(var(--hello-hue) 84% 45%);
+  --hello-ink-b: hsl(var(--hello-hue) 86% 36%);
+  --hello-glow: hsl(var(--hello-hue) 90% 55% / 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --hello-ground: radial-gradient(120% 90% at 50% 38%, #241c14 0%, #1c1610 45%, #141010 100%);
-    --hello-ink-a: #fbbf24;
-    --hello-ink-b: #f59e0b;
-    --hello-glow: rgba(251, 191, 36, 0.16);
+  :root:not([data-theme="light"]) .hello {
+    --hello-ground: radial-gradient(
+      120% 90% at 50% 38%,
+      hsl(var(--hello-hue) 28% 13%) 0%,
+      hsl(var(--hello-hue) 24% 10%) 45%,
+      hsl(var(--hello-hue) 18% 6%) 100%
+    );
+    --hello-ink-a: hsl(var(--hello-hue) 92% 62%);
+    --hello-ink-b: hsl(var(--hello-hue) 86% 56%);
+    --hello-glow: hsl(var(--hello-hue) 92% 60% / 0.18);
   }
 }
 
-:root[data-theme="dark"] {
-  --hello-ground: radial-gradient(120% 90% at 50% 38%, #241c14 0%, #1c1610 45%, #141010 100%);
-  --hello-ink-a: #fbbf24;
-  --hello-ink-b: #f59e0b;
-  --hello-glow: rgba(251, 191, 36, 0.16);
+:root[data-theme="dark"] .hello {
+  --hello-ground: radial-gradient(
+    120% 90% at 50% 38%,
+    hsl(var(--hello-hue) 28% 13%) 0%,
+    hsl(var(--hello-hue) 24% 10%) 45%,
+    hsl(var(--hello-hue) 18% 6%) 100%
+  );
+  --hello-ink-a: hsl(var(--hello-hue) 92% 62%);
+  --hello-ink-b: hsl(var(--hello-hue) 86% 56%);
+  --hello-glow: hsl(var(--hello-hue) 92% 60% / 0.18);
 }
 
 .hello {
