@@ -318,7 +318,12 @@ export default function Console({ onExit }: { onExit: () => void }) {
     if (!auto || busy) return;
     const current = board?.sessions.find((entry) => entry.id === session);
     if (!current || current.running > 0) return;
-    if (!current.agents.some((agent) => agent.mine && agent.state === "assigned")) return;
+    // `assigned` alone is not "idle, needs work": a finished turn resets to it,
+    // so auto mode would restart the same Agent forever and the task would
+    // never come to rest. One turn per Agent; after that the owner approves.
+    const idle = (agent: SessionAgent): boolean =>
+      agent.mine && agent.state === "assigned" && agent.turns === 0;
+    if (!current.agents.some(idle)) return;
     // Peer feedback before fresh work, and this order is what keeps the
     // one-run-per-Agent 409 from firing: an Agent that just took a
     // re-iteration is no longer idle, so it does not also get a plain turn.
@@ -514,8 +519,14 @@ export default function Console({ onExit }: { onExit: () => void }) {
 
   const stopSubtask = (agent: SessionAgent) =>
     void guardAction("stop:" + agent.subtaskId, () => api.stopSubtask(agent.subtaskId));
+  // Approving is two server steps: the Agent proposes the merge (which the PDP
+  // checks against its warrant) and then the owner approves it. The owner
+  // pressing one button is still both decisions, and both land in the chain.
   const approveSubtask = (agent: SessionAgent) =>
-    void guardAction("approve:" + agent.subtaskId, () => api.approve(agent.subtaskId));
+    void guardAction("approve:" + agent.subtaskId, async () => {
+      await api.submit(agent.subtaskId);
+      await api.approve(agent.subtaskId);
+    });
   const runAgent = (agent: SessionAgent) =>
     void guardAction("run:" + agent.subtaskId, () =>
       api.runSubtask(

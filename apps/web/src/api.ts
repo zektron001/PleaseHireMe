@@ -311,6 +311,11 @@ export const api = {
       "/api/warrant/tasks/" + encodeURIComponent(taskId) + "/autorun",
       json(prompt ? { prompt } : {}),
     ),
+  submit: (subtaskId: string) =>
+    asHuman<{ subtask: Subtask }>(
+      "/api/warrant/subtasks/" + encodeURIComponent(subtaskId) + "/submit",
+      { method: "POST" },
+    ),
   approve: (subtaskId: string) =>
     asHuman<{ subtask: Subtask }>(
       "/api/warrant/subtasks/" + encodeURIComponent(subtaskId) + "/approve",
