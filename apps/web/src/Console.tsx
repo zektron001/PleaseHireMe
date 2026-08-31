@@ -786,12 +786,31 @@ export default function Console({ onExit }: { onExit: () => void }) {
    * screen before the step arrives. The sidebar is one element that answers
    * to three different `data-tour` ids depending on which panel is showing,
    * so "reveal the Explorer" is genuinely `setPanel("files")` and not a
-   * scroll. Memoized because <Tour> has this in an effect's dependency list.
+   * scroll. Memoized because <Tour> has this in an effect's dependency list -
+   * which is also why the document list is read through a ref instead of
+   * closed over: a new identity on every docs refresh would re-fire the reveal.
    */
+  const tourLatest = useRef({ docs, openTabs });
+  tourLatest.current = { docs, openTabs };
+
   const revealForTour = useCallback((target: string) => {
     if (target === "explorer" || target === "agents" || target === "access") {
       setPanel(target === "explorer" ? "files" : target);
       setSidebarOpen(true);
+      return;
+    }
+    // The tab strip only exists once something is open, and on a genuine first
+    // run nothing is - the step would spotlight nothing and fall back to a
+    // centered card. Opening the first document is the honest fix: the step is
+    // about tabs, so there had better be a tab.
+    if (target === "tabstrip" || target === "editor") {
+      const { docs: known, openTabs: tabs } = tourLatest.current;
+      const first = known[0]?.id;
+      if (tabs.length === 0 && first) {
+        setSelected(first);
+        setOpenTabs([first]);
+        setView("workspace");
+      }
       return;
     }
     if (target === "activitybar") {
