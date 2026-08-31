@@ -62,6 +62,8 @@ import { ShareDialog } from "./views/ShareDialog";
 import { SharedWithMe } from "./views/SharedWithMe";
 import { Tour } from "./onboarding/Tour";
 import { useTour } from "./onboarding/useTour";
+import { Hello } from "./onboarding/Hello";
+import { hasSeenHello } from "./onboarding/greeting";
 import { useAgents } from "./state/useAgents";
 import { SourceControlView } from "./views/SourceControlView";
 import { clockOf, colorOf, humanName, initialsOf, shortId } from "./participants";
@@ -177,6 +179,8 @@ function Side({ label, text, marked }: { label: string; text: string; marked: st
 export default function Console({ onExit }: { onExit: () => void }) {
   const [humans, setHumans] = useState<Human[]>([]);
   const [me, setMe] = useState<Human | null>(null);
+  /** The human being greeted right now, or null when no greeting is up. */
+  const [greeting, setGreeting] = useState<Human | null>(null);
   const [task, setTask] = useState<PlannedTask | null>(null);
   const [title, setTitle] = useState("Add rate limiting to the API");
   const [shared, setShared] = useState(DEFAULT_SHARED);
@@ -269,6 +273,10 @@ export default function Console({ onExit }: { onExit: () => void }) {
       const result = await api.signIn(human.handle);
       setSessionToken(result.token);
       setMe(result.human);
+      // Their name, written out - once per human, so the second person to
+      // sign in on a shared demo machine gets their own hello rather than
+      // the tail of someone else's.
+      if (!hasSeenHello(result.human.id)) setGreeting(result.human);
       setError(null);
       setLive([]);
       setBoard(null);
@@ -1067,6 +1075,11 @@ export default function Console({ onExit }: { onExit: () => void }) {
       {/* Last of the overlays, so its spotlight sits above the dialogs as
           well as the workbench. */}
       <Tour open={tour.open} onClose={tour.stop} onReveal={revealForTour} />
+
+      {/* Above even the tour: the greeting is the first thing, always. */}
+      {greeting ? (
+        <Hello human={greeting} onDone={() => setGreeting(null)} />
+      ) : null}
 
       <CreateAgentDialog
         open={showCreateAgent}
