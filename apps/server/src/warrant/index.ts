@@ -14,6 +14,7 @@ import { Redactor } from "../aegis/redact.js";
 import type { Verdict } from "../aegis/types.js";
 import { authorize, type AuthzFacts } from "./policy.js";
 import { Orchestrator, ORCHESTRATOR_ID } from "./orchestrator.js";
+import type { PlanInput, PlanResult } from "./orchestrator.js";
 import { Registry } from "./registry.js";
 import { ShareRegistry } from "./sharing.js";
 import { createSplitter } from "./splitter.js";
@@ -26,6 +27,24 @@ import { warrantAuthzCheck } from "../concord/routes.js";
 import type { AuthzDecision, HumanPrincipal, WarrantAction } from "./types.js";
 
 export const POLICY_VERSION = "warrant-1.0.0";
+
+/**
+ * The single operator the product runs as.
+ *
+ * Deliberately the handle `orchestrator`, so `ORCHESTRATOR_ID` resolves to the
+ * one human present. That is not a shortcut: with one user, the person who
+ * splits the task IS the person entitled to review the whole fan-out and to
+ * integrate it. Making them a separate principal would mean the operator could
+ * not see their own Agents' evidence.
+ */
+export const OPERATOR = { handle: "orchestrator", displayName: "You" } as const;
+
+/** The multi-human set the authorization tests need to exercise WB-6. */
+export const MOCK_HUMANS = [
+  { handle: "alice", displayName: "Alice Chen" },
+  { handle: "bob", displayName: "Bob Okafor" },
+  OPERATOR,
+] as const;
 
 export interface CheckInput {
   /** Session token, when a human is the caller. Never a client-supplied id. */
@@ -75,6 +94,24 @@ export class WarrantPlane {
   static async bootstrap(
     config: AppConfig,
     sharedAudit?: AuditLog,
+    /**
+     * Who exists on this platform.
+     *
+     * Several, and that is a reversal worth recording. The multi-agent work
+     * seeded exactly ONE operator, on the argument that a warrant is a
+     * delegation from a human to an Agent and one person delegating to six
+     * exercises the model as well as two people delegating to three. That
+     * argument still holds - but sharing does not survive it. `warrant/sharing.ts`
+     * refuses a grant where `granterId === granteeId` and requires the grantee
+     * to exist, so with one seeded human the share dialog, the shared-with-me
+     * inbox and every WB-12/WB-13 rule become unreachable UI.
+     *
+     * So: several humans by default, because two features need them and none
+     * needs their absence. Single-operator remains one argument away - pass
+     * `[OPERATOR]` here - and nothing in the orchestration, the section
+     * allocation or the live screens depends on the count either way.
+     */
+    humans: readonly { handle: string; displayName: string }[] = MOCK_HUMANS,
   ): Promise<WarrantPlane> {
     const registry = new Registry();
     const workspaces = new SubtaskWorkspaceManager(
@@ -102,10 +139,7 @@ export class WarrantPlane {
     );
     if (!sharedAudit) await audit.initialize();
 
-    // Two mock humans, as Track B requires. Section 8 blesses mock users.
-    registry.addHuman("alice", "Alice Chen");
-    registry.addHuman("bob", "Bob Okafor");
-    registry.addHuman("orchestrator", "Task Orchestrator");
+    for (const human of humans) registry.addHuman(human.handle, human.displayName);
 
     const plane = new WarrantPlane(
       registry,
@@ -122,6 +156,64 @@ export class WarrantPlane {
   /** The only way to learn who is calling. See registry.resolveSession. */
   whoami(token: string | undefined): HumanPrincipal | null {
     return this.registry.resolveSession(token);
+  }
+
+  /**
+   * Plan a task AND divide its shared document between the Agents.
+   *
+   * Splitting alone leaves every Agent free to write anywhere in the file, so
+   * "they do not collide" is a property of the merge rather than of the plan.
+   * This closes that: each subtask is allocated one section, the document is
+   * seeded so that every allocated section actually exists, and CONCORD then
+   * refuses any write that reaches outside one.
+   *
+   * The seeding is additive. A document that already has content keeps it, and
+   * only missing headings are appended - so planning a second task over a file
+   * an Agent has already written to cannot destroy that work.
+   */
+  async planAllocated(input: PlanInput): Promise<PlanResult> {
+    const result = await this.orchestrator.plan(input);
+    const docId = input.sharedPaths?.[0];
+    if (!docId) return result;
+
+    const allocated = result.subtasks.filter((subtask) => subtask.section !== null);
+    if (allocated.length === 0) return result;
+
+    const existing = this.docs.snapshot(docId);
+    const current = existing?.content ?? "";
+    const lines = current.length > 0 ? current.split("\n") : [];
+    const present = new Set(lines.map((line) => line.trim()));
+
+    const additions: string[] = [];
+    if (lines.length === 0) additions.push("# " + result.task.title, "");
+    for (const subtask of allocated) {
+      const heading = subtask.section as string;
+      if (present.has(heading)) continue;
+      // A placeholder line so the section is non-empty. An Agent appending to
+      // an empty section would otherwise have nothing to anchor an insert to.
+      additions.push(heading, "- (not started)", "");
+    }
+
+    if (additions.length > 0) {
+      const next = [...lines, ...additions].join("\n");
+      const outcome = await this.docs.writeAsHuman(
+        docId,
+        input.createdBy,
+        existing?.version ?? 0,
+        next,
+        { message: "allocate sections for " + result.task.title },
+      );
+      // A seed that loses a race is not fatal: the sections may already exist
+      // because somebody else planned first. The allocations below still hold.
+      if (outcome.status === "leased") {
+        throw new Error("Cannot allocate sections while the document is leased");
+      }
+    }
+
+    for (const subtask of allocated) {
+      this.docs.sections.allocate(docId, subtask.agentId, subtask.section as string);
+    }
+    return result;
   }
 
   /**

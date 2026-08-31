@@ -15,7 +15,7 @@ import type { FastifyInstance } from "fastify";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import type { AgentService } from "../agent-service.js";
-import { WarrantPlane } from "./index.js";
+import { MOCK_HUMANS, WarrantPlane } from "./index.js";
 import { workspaceResource } from "./resources.js";
 
 const service = {
@@ -34,7 +34,7 @@ beforeEach(async () => {
     APP_DATA_DIR: dir,
     AEGIS_ENABLED: "false",
   } as NodeJS.ProcessEnv);
-  plane = await WarrantPlane.bootstrap(config);
+  plane = await WarrantPlane.bootstrap(config, undefined, MOCK_HUMANS);
   app = await createApp(config, service, undefined, plane);
 });
 

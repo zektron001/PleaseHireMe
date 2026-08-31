@@ -41,12 +41,31 @@ export interface ActivityEvent {
   readonly kind: ActivityKind;
   /** Short, safe, already truncated. Never a full file or a whole prompt. */
   readonly detail: string;
+  /** The shared document this work concerns, when there is one. */
+  readonly docId?: string;
   /** Only on turn-completed, and only what the runner actually reported. */
   readonly usage?: {
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly model?: string;
   };
+}
+
+/**
+ * One state of an Agent's workspace copy of a file, as it really was on disk.
+ * Defined here rather than in workspace.ts so the bus does not import its own
+ * publisher.
+ */
+export interface WorkspaceFrame {
+  readonly agentId: string;
+  readonly subtaskId: string | null;
+  readonly humanId: string | null;
+  readonly docId: string;
+  readonly section: string | null;
+  readonly at: string;
+  readonly content: string;
+  readonly changed: { readonly startLine: number; readonly endLine: number } | null;
+  readonly truncated: boolean;
 }
 
 /** Running totals per Agent. Every number came off a real RunnerResult. */
@@ -204,6 +223,7 @@ export class ActivityBus {
     /** Redacted to a short summary by the caller. Never the compiled prompt. */
     prompt?: string;
     model?: string;
+    docId?: string;
   }): {
     inspect: (line: string) => boolean;
     finish: (usage: { inputTokens?: number; outputTokens?: number } | null) => void;
@@ -214,6 +234,7 @@ export class ActivityBus {
       subtaskId: context.subtaskId,
       humanId: context.humanId,
       purpose: context.purpose,
+      ...(context.docId === undefined ? {} : { docId: context.docId }),
     };
     if (context.prompt) {
       this.publish({ ...base, kind: "prompt", detail: trim(context.prompt) });
@@ -250,6 +271,42 @@ export class ActivityBus {
     this.subscribers.add(subscriber);
     return () => {
       this.subscribers.delete(subscriber);
+    };
+  }
+
+  // ------------------------------------------------------ workspace frames
+  //
+  // Kept on their own ring rather than mixed into the activity feed. A frame
+  // carries a whole file; interleaving them with the one-line rows a human
+  // reads would push real events off the board within a couple of turns.
+
+  private readonly frames = new Map<string, WorkspaceFrame>();
+  private readonly frameSubscribers = new Set<(frame: WorkspaceFrame) => void>();
+
+  publishWorkspace(frame: WorkspaceFrame): void {
+    // Only the latest frame per Agent is retained. A client that connects late
+    // wants the current state of the file, not a replay of how it got there.
+    this.frames.set(frame.agentId + "\u0000" + frame.docId, frame);
+    for (const subscriber of [...this.frameSubscribers]) {
+      try {
+        subscriber(frame);
+      } catch {
+        this.frameSubscribers.delete(subscriber);
+      }
+    }
+  }
+
+  latestFrames(agentIds: readonly string[] | null): WorkspaceFrame[] {
+    const rows = [...this.frames.values()];
+    return agentIds === null
+      ? rows
+      : rows.filter((frame) => agentIds.includes(frame.agentId));
+  }
+
+  subscribeWorkspace(subscriber: (frame: WorkspaceFrame) => void): () => void {
+    this.frameSubscribers.add(subscriber);
+    return () => {
+      this.frameSubscribers.delete(subscriber);
     };
   }
 }

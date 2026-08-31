@@ -99,6 +99,14 @@ export interface Subtask {
   readonly model: string;
   /** Repo paths this subtask is allowed to change. */
   readonly paths: readonly string[];
+  /**
+   * The heading of the section this Agent is allocated in the shared document,
+   * or null when the task has no shared document to divide. CONCORD refuses a
+   * write that changes a line outside it - see concord/sections.ts.
+   */
+  readonly section: string | null;
+  /** The shared document `section` refers to. */
+  readonly sectionDoc: string | null;
   state: SubtaskState;
   warrantId: string | null;
   approvedBy: string | null;

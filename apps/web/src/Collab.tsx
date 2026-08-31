@@ -17,14 +17,7 @@ import type {
   BoardSession,
   QueueRow,
 } from "./types";
-import {
-  clockOf,
-  colorOf,
-  expiresIn,
-  humanName,
-  initialsOf,
-  shortId,
-} from "./participants";
+import { clockOf, colorOf, expiresIn, humanName, initialsOf, shortId } from "./participants";
 
 /* ------------------------------------------------------------------ people */
 

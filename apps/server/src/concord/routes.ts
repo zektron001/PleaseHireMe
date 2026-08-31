@@ -39,6 +39,11 @@ const writeBody = z.object({
    */
   message: z.string().trim().max(500).optional(),
 });
+const humanWriteBody = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  content: z.string().max(1_000_000),
+  message: z.string().trim().max(200).optional(),
+});
 const leaseBody = z.object({
   agentId: z.string().trim().min(1),
   ttlMs: z.number().int().min(1_000).max(600_000).optional(),
@@ -140,6 +145,45 @@ export async function registerConcordRoutes(
             ? 423 // Locked
             : 409; // Conflict
     return reply.code(code).send({ outcome });
+  });
+
+  /**
+   * A direct human edit - the autosave behind the editor.
+   *
+   * PUT rather than POST, and no `agentId` anywhere: this is the human writing,
+   * not an Agent acting for them. No warrant is consulted, because a warrant is
+   * a delegation FROM this human; and no section allocation applies, because
+   * allocations bind Agents to their assigned work while the human owns the
+   * whole file.
+   *
+   * 409 when the document moved underneath. A human edit is interactive, so
+   * silently merging text somebody is still typing is worse than telling them.
+   */
+  app.put("/api/concord/docs/:docId", async (request, reply) => {
+    const { docId } = docParams.parse(request.params);
+    const body = humanWriteBody.parse(request.body);
+    const human = requireHuman(request);
+
+    const outcome = await store.writeAsHuman(
+      docId,
+      human.id,
+      body.expectedVersion,
+      body.content,
+      { ...(body.message ? { message: body.message } : {}) },
+    );
+    const code =
+      outcome.status === "written" ? 200 : outcome.status === "leased" ? 423 : 409;
+    return reply.code(code).send({ outcome });
+  });
+
+  /** Which Agent owns which section of this document. Drives the editor's bands. */
+  app.get("/api/concord/docs/:docId/sections", async (request) => {
+    const { docId } = docParams.parse(request.params);
+    const { agentId } = agentQuery.parse(request.query);
+    actingAs(request, agentId);
+    const gate = store.readHistory(docId, agentId);
+    if (gate.status === "denied") throw new HttpError(403, gate.reason);
+    return { docId, allocations: store.sections.listFor(docId) };
   });
 
   /**

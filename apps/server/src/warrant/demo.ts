@@ -13,7 +13,7 @@ import path from "node:path";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import type { AgentService } from "../agent-service.js";
-import { WarrantPlane } from "./index.js";
+import { MOCK_HUMANS, WarrantPlane } from "./index.js";
 import { workspaceResource } from "./resources.js";
 import { readdir } from "node:fs/promises";
 import { buildContainerRunArgs } from "../container-codex-runner.js";
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     AEGIS_ENABLED: "false",
     ARK_MODEL: "ep-demo-balanced",
   } as NodeJS.ProcessEnv);
-  const plane = await WarrantPlane.bootstrap(config);
+  const plane = await WarrantPlane.bootstrap(config, undefined, MOCK_HUMANS);
   const app = await createApp(config, service, undefined, plane);
 
   const login = async (handle: string): Promise<string> =>

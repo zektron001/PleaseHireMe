@@ -12,7 +12,13 @@
  */
 
 import type { PolicyContext, PolicyRequest, AgentPrincipal } from "../types.js";
-import { destinationsIn, fileResource, netResource, pathsIn } from "./resource.js";
+import {
+  destinationsIn,
+  fileResource,
+  netResource,
+  pathsIn,
+  stripHeredocs,
+} from "./resource.js";
 
 interface ExtractOptions {
   readonly principal: AgentPrincipal;
@@ -58,10 +64,15 @@ export function extractRequests(
     // The command text itself, so a rule can reason about the whole invocation.
     push("proc.exec", command);
 
-    for (const { host, port } of destinationsIn(command)) {
+    // Paths and hosts are read from the ACTING part of the command only. A
+    // here-document body is the file being written, not an invocation - see
+    // stripHeredocs. The redirect target survives the strip, so writing to a
+    // forbidden path is refused exactly as before.
+    const acting = stripHeredocs(command);
+    for (const { host, port } of destinationsIn(acting)) {
       push("net.connect", netResource(host, port));
     }
-    for (const target of pathsIn(command)) {
+    for (const target of pathsIn(acting)) {
       push("fs.read", fileResource(target));
     }
     return requests;

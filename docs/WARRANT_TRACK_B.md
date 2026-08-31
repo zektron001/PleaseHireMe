@@ -16,7 +16,7 @@
 | **Required denial** | Alice's Agent → Bob's workspace ⇒ `WB-6.cross-owner-denied`, HTTP 403. |
 | **Revocation** | Owner revokes a live warrant; the very next action is refused. |
 | **Success test (§3)** | *"changing a user ID in the browser request cannot bypass the authorization decision."* |
-| **Evidence** | 358 tests. `npm run demo:warrant` prints the whole story. |
+| **Evidence** | 403 tests. `npm run demo:warrant` prints the whole story. |
 
 ---
 

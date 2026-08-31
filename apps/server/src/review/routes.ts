@@ -105,13 +105,49 @@ export async function registerReviewRoutes(
     return subtask;
   };
 
-  /** Who should receive a comment on this range, from CONCORD provenance. */
+  /**
+   * Who should receive a comment on this range, from CONCORD provenance.
+   *
+   * Decorated with enough about the Agent for the reviewer to CONFIRM rather
+   * than to type an id. Selecting lines already tells the platform which Agent
+   * is responsible - asking a human to retype it was making them do the
+   * platform's own job, and getting it wrong meant a 400.
+   */
   app.get("/api/review/docs/:docId/route", async (request) => {
     const { docId } = docParams.parse(request.params);
     const { agentId, startLine, endLine } = rangeQuery.parse(request.query);
     actingAs(request, agentId);
     if (endLine < startLine) throw new HttpError(400, "endLine precedes startLine");
-    return review.routeFor(docId, agentId, startLine, endLine);
+
+    const routing = review.routeFor(docId, agentId, startLine, endLine);
+    const describe = (id: string) => {
+      const subtask = plane.orchestrator.subtaskByAgent(id);
+      return {
+        agentId: id,
+        title: subtask?.title ?? "Unassigned Agent",
+        model: subtask?.model ?? null,
+        section: subtask?.section ?? null,
+        state: subtask?.state ?? "unknown",
+        /** Whether this reviewer may actually direct it. */
+        mine: subtask?.ownerId === plane.whoami(bearerToken(request))?.id,
+      };
+    };
+
+    // Lines a human typed have no responsible Agent, and saying so is better
+    // than routing the question at whoever happened to write nearby.
+    const provenance = plane.docs.provenanceOf(docId);
+    const humanAuthored = provenance
+      .slice(startLine - 1, endLine)
+      .some((entry) => entry && !entry.lastModifiedByAgentId);
+
+    return {
+      ...routing,
+      humanAuthored,
+      candidates: routing.candidateAgentIds.map(describe),
+      recommended: routing.recommendedAgentId
+        ? describe(routing.recommendedAgentId)
+        : null,
+    };
   });
 
   app.get("/api/review/docs/:docId/comments", async (request) => {

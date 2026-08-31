@@ -23,7 +23,7 @@ import {
   SandboxProfileError,
 } from "../aegis/sandbox/args.js";
 import { WarrantBindingError } from "./binding.js";
-import { WarrantPlane } from "./index.js";
+import { MOCK_HUMANS, WarrantPlane } from "./index.js";
 import { workspaceResource } from "./resources.js";
 
 let dir = "";

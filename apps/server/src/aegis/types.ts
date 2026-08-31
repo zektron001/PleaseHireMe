@@ -44,6 +44,22 @@ export interface PolicyContext {
   readonly estimatedCostUsd: number;
   /** Hash only. The prompt itself never enters a policy request or an event. */
   readonly promptSha256: string;
+  /**
+   * The directory this run's Agent actually works in, IN THE NAMESPACE IT RUNS
+   * IN. Under the container runtime that is the bind mount; under
+   * `local-process` it is a host path under the workspace root.
+   *
+   * KS-3 needs this because the two are not the same string. The rule used to
+   * compare every path against the container mount unconditionally, so with
+   * `RUNTIME_PROVIDER=local-process` an Agent naming its OWN workspace by
+   * absolute path was refused - and Codex names its cwd by absolute path
+   * constantly. Every local turn died on its first `find`.
+   *
+   * Per-run rather than per-process also makes the confinement tighter than it
+   * was: an Agent is now held to its own directory rather than to whichever
+   * mount point the bundle was built with.
+   */
+  readonly workspacePath?: string | undefined;
 }
 
 export interface PolicyRequest {

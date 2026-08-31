@@ -109,7 +109,13 @@ export class GuardedAgentRunner implements AgentRunner {
 
   async run(request: RunnerRequest): Promise<RunnerResult> {
     // ---- G1 : admission. Throws ContainmentError("blocked") when refused. ----
-    const ticket = await this.aegis.admit(request.agentId, request.prompt);
+    // The workspace goes in at admission, so G3 holds this Agent to ITS OWN
+    // directory rather than to whatever mount the bundle was built with.
+    const ticket = await this.aegis.admit(
+      request.agentId,
+      request.prompt,
+      request.workspacePath,
+    );
     const live: Live = {
       ticket,
       violation: null,

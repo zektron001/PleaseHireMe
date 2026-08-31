@@ -19,7 +19,7 @@ import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import type { AgentService } from "../agent-service.js";
 import type { AgentRunner, RunnerRequest } from "../types.js";
-import { WarrantPlane } from "../warrant/index.js";
+import { MOCK_HUMANS, WarrantPlane } from "../warrant/index.js";
 
 const service = {
   listAgents: () => [],
@@ -64,7 +64,7 @@ beforeEach(async () => {
     CODEX_HOME: path.join(dir, "codex-home"),
     AEGIS_ENABLED: "false",
   } as NodeJS.ProcessEnv);
-  plane = await WarrantPlane.bootstrap(config);
+  plane = await WarrantPlane.bootstrap(config, undefined, MOCK_HUMANS);
   turn = async () => {};
   tokens.clear();
   app = await createApp(config, service, undefined, plane, runner);

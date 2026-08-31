@@ -106,7 +106,9 @@ class FakeRunner implements AgentRunner {
 let dir = "";
 let vault = "";
 
-async function makeAegis(): Promise<Aegis> {
+async function makeAegis(
+  runtimeProvider: "container" | "local-process" = "container",
+): Promise<Aegis> {
   const config = loadConfig({
     APP_DATA_DIR: dir,
     AGENT_WORKSPACE_ROOT: path.join(dir, "workspaces"),
@@ -114,6 +116,13 @@ async function makeAegis(): Promise<Aegis> {
     AEGIS_VAULT_PATH: vault,
     ARK_API_KEY: "ark-test-key-0123456789",
     ARK_MODEL: "ep-test",
+    // These fixtures emit `/workspace/...`, which is the path an Agent sees
+    // INSIDE a container. The config default is `local-process`, where the
+    // Agent sees a host path instead - so this has to be stated rather than
+    // inherited, or the fixtures model one runtime while the policy assumes
+    // another. That mismatch was invisible until G3 started comparing against
+    // the run's real workspace.
+    RUNTIME_PROVIDER: runtimeProvider,
   } as NodeJS.ProcessEnv);
   return Aegis.bootstrap(config);
 }
@@ -336,6 +345,79 @@ describe("KS-5 attestation failure escalates", () => {
   });
 });
 
+describe("the workspace an Agent is held to depends on the runtime", () => {
+  /**
+   * The bug this locks down broke every local turn.
+   *
+   * G3 compared every path against the CONTAINER mount, unconditionally. With
+   * `RUNTIME_PROVIDER=local-process` - the default, and what `npm run dev`
+   * uses - the Agent has no namespace of its own, so it names its own cwd by
+   * absolute host path. Codex does that constantly: its first move is usually
+   * `find <cwd>` or `cat <cwd>/file`. Every one of those was refused as
+   * "outside the Agent workspace", and AEGIS killed the run before it did any
+   * work. Three Agents launched in parallel died within ten seconds, having
+   * spent nothing and written nothing.
+   */
+  const hostWorkspace = () => path.join(dir, "workspaces", AGENT_A);
+
+  const LOCAL_RUN = (root: string) => [
+    eventLine({ type: "command_execution", command: "find " + root + " -type f" }),
+    eventLine({
+      type: "file_change",
+      changes: [{ path: path.join(root, "docs/CHANGELOG.md"), kind: "write" }],
+    }),
+  ];
+
+  it("lets a local-process Agent name its own workspace absolutely", async () => {
+    const aegis = await makeAegis("local-process");
+    const guarded = new GuardedAgentRunner(
+      new FakeRunner(LOCAL_RUN(hostWorkspace())),
+      aegis,
+      path.join(dir, "codex-home"),
+    );
+    const result = await guarded.run(request(AGENT_A, "do the work"));
+    expect(result.output).toBeDefined();
+  });
+
+  it("still refuses a local-process Agent that reaches outside it", async () => {
+    const aegis = await makeAegis("local-process");
+    const guarded = new GuardedAgentRunner(
+      new FakeRunner(LOCAL_RUN(path.join(dir, "workspaces", "someone-else"))),
+      aegis,
+      path.join(dir, "codex-home"),
+    );
+    const error = (await guarded
+      .run(request(AGENT_A, "snoop"))
+      .catch((caught: unknown) => caught)) as ContainmentError;
+    expect(error).toBeInstanceOf(ContainmentError);
+    expect(error.verdict.ruleId).toBe("KS-3.fs.deny-outside-workspace");
+  });
+
+  it("holds a container Agent to the mount, as it always did", async () => {
+    const aegis = await makeAegis("container");
+    const guarded = new GuardedAgentRunner(
+      new FakeRunner(BENIGN),
+      aegis,
+      path.join(dir, "codex-home"),
+    );
+    const result = await guarded.run(request(AGENT_A, "hello"));
+    expect(result.output).toBeDefined();
+
+    // And the host path is NOT what it is held to, even though the request
+    // carries one - inside a container the Agent never sees it.
+    const outside = new GuardedAgentRunner(
+      new FakeRunner(LOCAL_RUN(hostWorkspace())),
+      aegis,
+      path.join(dir, "codex-home"),
+    );
+    const error = (await outside
+      .run(request("agent-b", "host paths"))
+      .catch((caught: unknown) => caught)) as ContainmentError;
+    expect(error).toBeInstanceOf(ContainmentError);
+    expect(error.verdict.ruleId).toBe("KS-3.fs.deny-outside-workspace");
+  });
+});
+
 describe("budget exhaustion", () => {
   it("blocks a run once the Agent budget is spent", async () => {
     const config = loadConfig({
@@ -378,6 +460,8 @@ describe("T6 runaway execution", () => {
         AEGIS_VAULT_PATH: vault,
         ARK_API_KEY: "ark-test-key-0123456789",
         ARK_MODEL: "ep-test",
+        // CHATTY names `/workspace/...` too - see makeAegis.
+        RUNTIME_PROVIDER: "container",
         ...env,
       } as NodeJS.ProcessEnv),
     );

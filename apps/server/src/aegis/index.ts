@@ -55,6 +55,8 @@ export interface AdmissionTicket {
   readonly reservedUsd: number;
   readonly preRoot: string;
   readonly verdict: Verdict;
+  /** Where this Agent works, in its own namespace. See PolicyContext. */
+  readonly workspacePath?: string | undefined;
 }
 
 export function sha256(value: string): string {
@@ -87,7 +89,23 @@ export class Aegis {
     /** T6 - Codex items a single run may produce. 0 disables the cap. */
     readonly maxSteps: number,
     private readonly maxConcurrentRuns: number,
+    /**
+     * Which runtime the Agent actually runs in, and therefore which path IT
+     * sees its workspace at. The container binds the host directory at
+     * `WORKSPACE_MOUNT`, so an Agent inside one names `/workspace/...`;
+     * `local-process` has no namespace of its own, so the Agent names the host
+     * path. G3 has to compare against whichever of the two is real, and until
+     * now it always compared against the mount - which refused every
+     * local-process Agent that named its own cwd absolutely.
+     */
+    private readonly runtimeProvider: "local-process" | "container" = "container",
   ) {}
+
+  /** The path this run's Agent sees its own workspace at. */
+  private namespacePathFor(hostWorkspacePath: string | undefined): string | undefined {
+    if (this.runtimeProvider === "container") return WORKSPACE_MOUNT;
+    return hostWorkspacePath;
+  }
 
   /** T6 - concurrency limit. Held for the life of a run. */
   private readonly liveRuns = new Set<string>();
@@ -251,6 +269,7 @@ export class Aegis {
       config.aegisBrokerUrl,
       config.aegisMaxSteps,
       config.aegisMaxConcurrentRuns,
+      config.runtimeProvider,
     );
 
     // KS-1 - the network named in the profile has to actually exist, or every
@@ -281,21 +300,43 @@ export class Aegis {
     return aegis;
   }
 
-  context(runId: string, gate: GateId, prompt: string, estimate = 0): PolicyContext {
+  context(
+    runId: string,
+    gate: GateId,
+    prompt: string,
+    estimate = 0,
+    workspacePath?: string,
+  ): PolicyContext {
     return {
       runId,
       gate,
       estimatedCostUsd: estimate,
       promptSha256: sha256(prompt),
+      ...(workspacePath === undefined ? {} : { workspacePath }),
     };
   }
 
   /** G1 - admission. Throws ContainmentError("blocked") when refused. */
-  async admit(agentId: string, prompt: string): Promise<AdmissionTicket> {
+  async admit(
+    agentId: string,
+    prompt: string,
+    /**
+     * The run's workspace as a HOST path. Translated to the path the Agent
+     * itself sees before it reaches the policy - see namespacePathFor.
+     */
+    workspacePath?: string,
+  ): Promise<AdmissionTicket> {
     const runId = randomUUID();
     const principal = principalFor(agentId);
     const estimate = this.ledger.estimate(agentId);
-    const context = this.context(runId, "G1.preflight", prompt, estimate);
+    const namespacePath = this.namespacePathFor(workspacePath);
+    const context = this.context(
+      runId,
+      "G1.preflight",
+      prompt,
+      estimate,
+      namespacePath,
+    );
 
     const refuse = (
       ruleId: string,
@@ -369,7 +410,15 @@ export class Aegis {
       },
     });
 
-    return { runId, agentId, principal, reservedUsd: estimate, preRoot, verdict };
+    return {
+      runId,
+      agentId,
+      principal,
+      reservedUsd: estimate,
+      preRoot,
+      verdict,
+      ...(namespacePath === undefined ? {} : { workspacePath: namespacePath }),
+    };
   }
 
   /**
@@ -377,7 +426,13 @@ export class Aegis {
    * continue. Detective only: see the note in policy/extract.ts.
    */
   inspect(ticket: AdmissionTicket, line: string): Verdict | null {
-    const context = this.context(ticket.runId, "G3.interception", "");
+    const context = this.context(
+      ticket.runId,
+      "G3.interception",
+      "",
+      0,
+      ticket.workspacePath,
+    );
     const requests = extractRequests(line, {
       principal: ticket.principal,
       context,
