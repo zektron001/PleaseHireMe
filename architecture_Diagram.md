@@ -4,59 +4,75 @@ One task is split into subtasks. Each subtask has **one accountable human** and
 **one Agent acting for them** under a scoped, expiring, revocable *warrant*. The
 backend decides every access; the browser decides none of them.
 
+> **Rendered image:** [`docs/assets/architecture.png`](docs/assets/architecture.png)
+> — the same page as a picture, for slides and anywhere Mermaid does not render.
+
 ```mermaid
 flowchart TB
-    subgraph UNTRUSTED["🌐 UNTRUSTED — the browser decides nothing"]
-        UI["React workbench<br/>splits, runs, reviews, approves"]
-        AG["Agent process<br/>Codex CLI, one per subtask"]
-    end
-
-    UI -->|"session token<br/>(never a client-supplied id)"| BOUND
-    AG -->|"tool calls"| BOUND
-
-    BOUND{{"═══ TRUST BOUNDARY ═══<br/>Fastify + Zod validate shape;<br/>identity comes from the token, not the payload"}}
-
-    subgraph POLICY["🛡 POLICY PLANE — team-built middleware"]
+    subgraph L1["① UNTRUSTED — the browser decides nothing"]
         direction LR
-        W["<b>WARRANT</b> · gate B.authz<br/>who may touch what<br/><i>WB-0 allow · WB-1/4/5/6/9 deny</i>"]
-        C["<b>CONCORD</b> · gate C.concord<br/>what happens when many touch it at once<br/><i>CD-section.outside / .not-allocated / .missing</i>"]
-        A["<b>AEGIS</b> · gates G1–G4<br/>what the runtime can physically reach<br/><i>KS-1 egress · KS-2 vault · KS-3 fs · KS-6 budget</i>"]
+        UI["<b>React workbench</b><br/>splits · runs · reviews · approves"]
+        AG["<b>Agent process</b><br/>Codex CLI, one per subtask"]
     end
+
+    UI -- "session token<br/><i>never a client-supplied id</i>" --> BOUND
+    AG -- "tool calls" --> BOUND
+
+    BOUND{{"<b>═══ TRUST BOUNDARY ═══</b><br/>Fastify + Zod validate shape.<br/>Identity comes from the token, never the payload."}}
 
     BOUND --> W
-    W -->|"Allow"| C
-    W -->|"Deny 403"| DENY["Refusal returned<br/>with the rule that caused it"]
-    C -->|"serialised write"| STORE
-    C -->|"Deny"| DENY
-    W --> A
-    A -->|"Deny → contain"| RECOVER
+    BOUND --> C
+    BOUND --> A
 
-    subgraph RUNTIME["⚙ RUNTIME + DATA"]
-        STORE[("SharedDocStore<br/>revisions · provenance<br/>per-line authorship")]
-        WS[("Per-subtask workspaces<br/>siblings exist at no path")]
-        CHAIN[("Hash-linked audit chain<br/>prevHash → hash")]
+    subgraph L3["② POLICY PLANE — team-built middleware"]
+        direction LR
+        W["<b>WARRANT</b> · gate B.authz<br/>who may touch what<br/><i>WB-0 allow · WB-1/4/5/6/9 deny</i>"]
+        C["<b>CONCORD</b> · gate C.concord<br/>many hands, one file<br/><i>CD-section.outside / .not-allocated</i>"]
+        A["<b>AEGIS</b> · gates G1–G4<br/>what the runtime can reach<br/><i>KS-1 egress · KS-2 vault · KS-3 fs</i>"]
     end
 
-    A --> WS
-    WS -->|"reconcile"| C
-    W -.->|"every decision"| CHAIN
-    C -.->|"every decision"| CHAIN
-    A -.->|"every decision"| CHAIN
-    CHAIN -->|"SSE, live"| UI
-    STORE -->|"SSE, live"| UI
+    W -- "Allow" --> STORE
+    C -- "serialised write<br/>+ provenance" --> STORE
+    A -- "confines" --> WS
 
-    RECOVER["<b>Recovery</b><br/>revoke warrant mid-flight · stop a turn<br/>circuit breaker latches · conflict: ours/theirs/both"]
-    RECOVER --> UI
-    DENY --> UI
+    subgraph L4["③ RUNTIME + DATA"]
+        direction LR
+        STORE[("<b>SharedDocStore</b><br/>revisions · per-line authorship")]
+        WS[("<b>Per-subtask workspaces</b><br/>siblings exist at no path")]
+        CHAIN[("<b>Audit chain</b><br/>prevHash → hash")]
+    end
 
-    classDef untrusted fill:#3a2020,stroke:#b3261e,color:#fff
-    classDef policy fill:#16233d,stroke:#2f6df6,color:#fff
-    classDef runtime fill:#12271e,stroke:#16794a,color:#fff
-    classDef bound fill:#2b2410,stroke:#b8860b,color:#fff
-    class UNTRUSTED untrusted
-    class POLICY policy
-    class RUNTIME runtime
+    W -. "every decision" .-> CHAIN
+    C -. "every decision" .-> CHAIN
+    A -. "every decision" .-> CHAIN
+
+    STORE --> OUT
+    CHAIN --> OUT
+    WS --> OUT
+
+    subgraph L5["④ BACK TO THE BROWSER"]
+        direction LR
+        OUT["<b>Live over SSE</b><br/>provenance · decisions · workspace frames"]
+        DENY["<b>Refusal</b><br/>403 with the rule id<br/>that caused it"]
+        RECOVER["<b>Recovery</b><br/>revoke a warrant mid-flight · stop a turn<br/>circuit breaker · conflict: ours / theirs / both"]
+    end
+
+    style L1 fill:#2a1717,stroke:#c8524a,color:#ffb3aa
+    style L3 fill:#131f36,stroke:#4f8bf7,color:#a8c6ff
+    style L4 fill:#102219,stroke:#3f9d6d,color:#8fdcb4
+    style L5 fill:#1a1a24,stroke:#8b95a7,color:#c3ccdb
+
+    classDef untrusted fill:#3a2020,stroke:#c8524a,color:#fff,stroke-width:1.5px
+    classDef bound fill:#2b2410,stroke:#c9a227,color:#fff,stroke-width:2px
+    classDef plane fill:#16233d,stroke:#4f8bf7,color:#fff,stroke-width:1.5px
+    classDef data fill:#12271e,stroke:#3f9d6d,color:#fff,stroke-width:1.5px
+    classDef out fill:#232532,stroke:#8b95a7,color:#fff,stroke-width:1.5px
+
+    class UI,AG untrusted
     class BOUND bound
+    class W,C,A plane
+    class STORE,WS,CHAIN data
+    class OUT,DENY,RECOVER out
 ```
 
 ## Where each thing happens
@@ -83,8 +99,8 @@ flowchart TB
   serialised, each Agent is confined to its allocated section, and every line
   carries the Agent that last changed it, which is what routes a review comment.
 - **AEGIS** — a sandbox plane. Retained as defence in depth because fan-out makes
-  workspace isolation a real requirement. **Not the claimed track.**
+  workspace isolation a real requirement.
 
-> The orchestrator holds **no** workspace authority, deliberately. An agent that
+> The orchestrator holds no workspace authority, deliberately. An agent that
 > can read every workspace is the single principal an attacker needs — the
 > classic confused deputy. It splits, assigns and integrates, and nothing else.

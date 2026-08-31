@@ -88,7 +88,7 @@ Everything the brief asks for, in one place.
 | --- | --- |
 | **Setup, one line** | [`./try.sh`](try.sh) — see [Try it in one line](#try-it-in-one-line) |
 | **The middleware problem, and why** | [`docs/MASTER.md` §1](docs/MASTER.md) · the track statement at the top of this file |
-| **One-page architecture** | [`architecture_Diagram.md`](architecture_Diagram.md) — middleware, data flow, trust boundary, enforcement, instrumentation, recovery |
+| **One-page architecture** | [`architecture_Diagram.md`](architecture_Diagram.md) — middleware, data flow, trust boundary, enforcement, instrumentation, recovery. Rendered: [`docs/assets/architecture.png`](docs/assets/architecture.png) |
 | **Design summary** | [`docs/WARRANT_TRACK_B.md`](docs/WARRANT_TRACK_B.md) (judged) · [`docs/CONCORD_SHARED_STATE.md`](docs/CONCORD_SHARED_STATE.md) · [`docs/MIDDLEWARE_ARCHITECTURE.md`](docs/MIDDLEWARE_ARCHITECTURE.md) |
 | **Threat model** | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — implemented / partial / not-built, honestly labelled |
 | **Automated tests** | `npm run check` (typecheck + tests + build) · `npm run test:fuzz` · [`docs/TESTING.md`](docs/TESTING.md) |
