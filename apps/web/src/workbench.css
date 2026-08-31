@@ -1,0 +1,1530 @@
+/*
+ * The workbench chrome: grid, title bar, activity bar, sashes, tabs, panel,
+ * status bar, palette.
+ *
+ * Sizes are the ones VS Code actually uses - 35px title bar, 48px activity bar,
+ * 22px status bar, 35px tabs - because the proportions are most of what makes a
+ * screenshot read as VS Code rather than "a dark IDE-ish thing".
+ *
+ * The two resizable dimensions live in custom properties on <html> so a sash
+ * drag never goes through React. See Sash.tsx.
+ */
+
+:root {
+  --sidebar-width: 300px;
+  --panel-height: 220px;
+}
+
+.workbench {
+  display: grid;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--app-bg);
+  color: var(--ink);
+  font-family: var(--ui-font);
+  font-size: var(--ui-size);
+  grid-template-columns: 48px min-content 1fr;
+  grid-template-rows: 35px minmax(0, 1fr) min-content 22px;
+  grid-template-areas:
+    "title    title    title"
+    "activity sidebar  editor"
+    "activity panel    panel"
+    "status   status   status";
+}
+
+.workbench[data-sidebar="closed"] {
+  grid-template-columns: 48px 0 1fr;
+}
+
+/* While a sash is dragging, nothing else may take the pointer. */
+.sashing,
+.sashing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+.sashing .sash-horizontal,
+.sashing .sash-horizontal * {
+  cursor: row-resize !important;
+}
+
+/* ---------------------------------------------------------------- title bar */
+
+.titlebar {
+  grid-area: title;
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, 600px) 1fr;
+  align-items: center;
+  gap: 8px;
+  background: var(--titlebar-bg);
+  color: var(--titlebar-fg);
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px;
+  -webkit-app-region: drag;
+}
+
+.titlebar-menus {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.titlebar-logo {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  color: var(--accent);
+}
+
+.menu {
+  position: relative;
+}
+
+.menu > summary {
+  list-style: none;
+  cursor: default;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+.menu > summary:hover,
+.menu[open] > summary {
+  background: var(--con-hover);
+}
+
+.menu-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  min-width: 240px;
+  margin: 2px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--widget-border);
+  border-radius: 5px;
+  box-shadow: var(--shadow);
+}
+
+.menu-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+.menu-list button:hover:not(:disabled) {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.menu-list button:disabled {
+  color: var(--con-faint);
+}
+.menu-list kbd {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: var(--con-faint);
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.quick-input {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.quick-input:hover {
+  border-color: var(--accent);
+}
+.quick-input .codicon {
+  font-size: 13px;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.whoami {
+  display: flex;
+  gap: 2px;
+}
+
+.whoami-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 22px;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  padding: 0 8px 0 3px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.whoami-chip:hover {
+  background: var(--con-hover);
+}
+.whoami-chip[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--titlebar-fg);
+  cursor: pointer;
+}
+.icon-button:hover {
+  background: var(--con-hover);
+}
+.icon-button[data-active="false"] {
+  color: var(--con-faint);
+}
+
+/* ------------------------------------------------------------ activity bar */
+
+.activitybar {
+  grid-area: activity;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--chrome);
+  border-right: 1px solid var(--line);
+}
+
+.activitybar button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--activitybar-fg);
+  cursor: pointer;
+}
+.activitybar button:hover {
+  color: var(--activitybar-fg-active);
+}
+.activitybar button[data-active="true"] {
+  color: var(--activitybar-fg-active);
+  border-left-color: var(--activitybar-fg-active);
+}
+.activitybar .codicon {
+  font-size: 24px;
+}
+.activitybar .activity-spacer {
+  flex: 1;
+}
+
+.activity-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- side bar */
+
+/* Scoped to the workbench: the Playground has its own `.sidebar`, and an
+   unscoped `grid-area: sidebar` here threw that one into a phantom grid column. */
+.workbench > .sidebar {
+  grid-area: sidebar;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  min-width: 0;
+  /* Grid items default to min-height:auto, so a tall view would push the side
+     bar straight through the status bar. */
+  min-height: 0;
+  background: var(--chrome-2);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.workbench[data-sidebar="closed"] .sidebar {
+  display: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 35px;
+  padding: 0 20px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--con-dim);
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+/* -------------------------------------------------------------------- sash */
+
+.sash {
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+}
+.sash:hover,
+.sashing .sash {
+  background: var(--accent);
+}
+.sash-vertical {
+  top: 0;
+  right: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+}
+.sash-horizontal {
+  top: -2px;
+  left: 0;
+  height: 4px;
+  width: 100%;
+  cursor: row-resize;
+}
+
+/* ------------------------------------------------------------ editor area */
+
+.editor-area {
+  grid-area: editor;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--editor-bg);
+}
+
+.tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: 35px;
+  flex: 0 0 auto;
+  background: var(--tab-inactive-bg);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  min-width: 120px;
+  max-width: 240px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-top: 1px solid transparent;
+  background: var(--tab-inactive-bg);
+  color: var(--tab-inactive-fg);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab[data-active="true"] {
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+  border-top-color: var(--tab-active-border-top);
+}
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  opacity: 0;
+  font-size: 14px;
+}
+.tab:hover .tab-close,
+.tab[data-active="true"] .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--con-hover);
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--con-faint);
+  text-align: center;
+}
+.editor-empty kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  font-family: var(--ui-font);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------- panel */
+
+.panel {
+  grid-area: panel;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--panel-height);
+  min-height: 0;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+.workbench[data-panel="closed"] .panel {
+  height: 35px;
+}
+.workbench[data-panel="closed"] .panel-body {
+  display: none;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 35px;
+  flex: 0 0 auto;
+  padding: 0 8px 0 20px;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+.panel-tab {
+  position: relative;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--con-dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 35px;
+  cursor: pointer;
+}
+.panel-tab:hover {
+  color: var(--ink);
+}
+.panel-tab[data-active="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -1px 0 var(--ink);
+}
+.panel-tab .activity-badge {
+  position: static;
+  margin-left: 6px;
+  display: inline-block;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 20px 12px;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0;
+  background: var(--statusbar-bg);
+  color: var(--statusbar-fg);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.status-side {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+button.status-item {
+  cursor: pointer;
+}
+button.status-item:hover {
+  background: var(--statusbar-hover);
+}
+.status-item .codicon {
+  font-size: 14px;
+}
+.status-item[data-tone="remote"] {
+  background: var(--statusbar-remote-bg);
+  color: #fff;
+}
+.status-item[data-tone="warn"] {
+  color: var(--con-contest);
+}
+.status-item[data-tone="error"] {
+  background: var(--con-deny);
+  color: #fff;
+}
+
+/* ----------------------------------------------------------------- palette */
+
+.palette {
+  width: min(680px, 90vw);
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--widget-border);
+  border-radius: 6px;
+  background: var(--widget-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  position: fixed;
+  top: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.palette::backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.palette-input .codicon {
+  color: var(--con-dim);
+}
+.palette-input input {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.palette-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 4px 6px;
+  list-style: none;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.palette-row[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.palette-row[data-active="true"] .palette-cat,
+.palette-row[data-active="true"] .palette-key {
+  color: rgba(255, 255, 255, 0.75);
+}
+.palette-row[data-disabled="true"] {
+  opacity: 0.45;
+}
+.palette-cat {
+  color: var(--con-dim);
+  font-size: 12px;
+}
+.palette-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-key {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: var(--con-faint);
+}
+.palette-empty {
+  padding: 10px 8px;
+  color: var(--con-faint);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ shared */
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 20px 0 8px;
+  height: 22px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tree-row:hover {
+  background: var(--con-hover);
+}
+.tree-row[data-active="true"] {
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
+}
+.tree-row .codicon {
+  font-size: 16px;
+  flex: 0 0 auto;
+  color: var(--con-dim);
+}
+.tree-row[data-active="true"] .codicon {
+  color: inherit;
+}
+.tree-row[data-active="true"] .tree-meta {
+  color: rgba(255, 255, 255, 0.85);
+}
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+.tree-row[data-active="true"] .tree-meta {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ------------------------------------------------------------------- views */
+
+.view-note {
+  margin: 0 0 6px;
+  padding: 8px 20px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--con-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.view-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.view-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--con-dim);
+}
+
+.view-section .activity-badge {
+  position: static;
+}
+
+.tree-conflict {
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--con-deny);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Source control */
+
+.commit-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px 20px;
+  align-items: flex-start;
+}
+
+.commit-row:hover {
+  background: var(--con-hover);
+}
+
+.commit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.commit-summary {
+  font-size: 13px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.commit-tag {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--con-select);
+  color: var(--ink);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------- run and debug --- */
+
+.view-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.view-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  background: var(--con-raise-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.view-button:hover:not(:disabled) {
+  background: var(--con-hover);
+}
+
+.view-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.view-button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.view-button.danger:hover:not(:disabled) {
+  border-color: var(--con-deny);
+  color: var(--con-deny);
+}
+
+.status-ready {
+  color: var(--con-allow) !important;
+}
+.status-error {
+  color: var(--con-deny) !important;
+}
+.status-busy {
+  color: var(--con-contest) !important;
+}
+
+.runtime-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 20px 8px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.runtime-lines > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.runtime-lines .codicon {
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------- agent chat */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--editor-bg);
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-head strong {
+  display: block;
+  font-size: 13px;
+}
+
+.chat-head span {
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.chat-session {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.chat-welcome {
+  max-width: 620px;
+  margin: 40px auto;
+  text-align: center;
+}
+
+.chat-welcome h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.chat-welcome p {
+  margin: 0 0 18px;
+  color: var(--con-dim);
+  font-size: 13px;
+}
+
+.chat-welcome button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--con-raise);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-welcome button:hover {
+  border-color: var(--accent);
+}
+
+.chat-message {
+  max-width: 780px;
+  margin: 0 auto 16px;
+}
+
+.chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.chat-meta strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.chat-body {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: var(--con-raise);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-user .chat-body {
+  background: var(--con-select);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.chat-failed .chat-body {
+  border-color: var(--con-deny-line);
+  background: var(--con-deny-bg);
+  color: var(--con-deny);
+}
+
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--con-dim);
+}
+
+.chat-composer {
+  flex: 0 0 auto;
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-composer textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.chat-composer textarea:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.chat-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--con-dim);
+}
+
+.chat-composer-foot button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.chat-composer-foot button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- dialog */
+
+.wb-dialog {
+  width: min(520px, 92vw);
+  padding: 0;
+  border: 1px solid var(--widget-border);
+  border-radius: 6px;
+  background: var(--widget-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.wb-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.wb-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 16px;
+}
+
+.wb-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.wb-dialog p {
+  margin: 0;
+  color: var(--con-dim);
+  font-size: 12px;
+}
+
+.wb-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--con-dim);
+}
+
+.wb-dialog input,
+.wb-dialog textarea {
+  padding: 5px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.wb-dialog input:focus,
+.wb-dialog textarea:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.wb-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.wb-dialog-foot .view-button {
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+/* ------------------------------------------------------------- share dialog
+   Familiar on purpose: this is the Google Docs share sheet, so the muscle
+   memory transfers. The rows are two lines rather than one because the second
+   line - which Agent the recipient brought - is the part that is actually
+   load-bearing here. Every colour comes from the theme tokens, so the dialog
+   follows Light+/Dark+ like the rest of the workbench. */
+
+.share-dialog {
+  width: min(640px, 94vw);
+}
+
+.share-dialog .share-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.share-dialog h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.share-dialog .share-head p {
+  margin: 0;
+  color: var(--con-dim);
+  font-size: 11.5px;
+}
+
+.share-dialog code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--con-soft);
+}
+
+.share-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--con-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.share-x:hover:not(:disabled) {
+  background: var(--con-hover);
+  color: var(--ink);
+}
+
+.share-x:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.share-error {
+  margin: 10px 18px 0;
+  padding: 6px 9px;
+  border: 1px solid var(--con-deny-line);
+  border-radius: 4px;
+  background: var(--con-deny-bg);
+  color: var(--con-deny);
+  font-size: 12px;
+}
+
+.share-add {
+  display: flex;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.share-add select {
+  padding: 5px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.share-add select:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.share-hint {
+  margin: 8px 18px 0;
+  color: var(--con-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.share-hint b {
+  color: var(--ink);
+}
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  padding: 14px 18px 4px;
+  overflow-y: auto;
+}
+
+.share-list .eyebrow {
+  margin-bottom: 4px;
+  color: var(--con-faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.share-empty,
+.share-noagent {
+  color: var(--con-faint);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.share-empty {
+  margin: 2px 0;
+}
+
+/* Two rows: the person, then what they brought. The grid keeps the second
+   line aligned under the name rather than under the avatar. */
+.share-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 6px;
+  border-radius: 5px;
+}
+
+.share-row:hover {
+  background: var(--con-hover);
+}
+
+.share-row[data-mine="true"] {
+  background: var(--con-select);
+}
+
+.share-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.share-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.share-who b {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.share-who small {
+  color: var(--con-dim);
+  font-size: 11px;
+}
+
+.share-you {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.share-role {
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.share-role:hover:not(:disabled) {
+  border-color: var(--input-border);
+  background: var(--input-bg);
+}
+
+/* The second line. Starts in the name column so it reads as a continuation
+   of the person, not as a separate row. */
+.share-agents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  grid-column: 2 / -1;
+}
+
+.share-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 9px;
+  background: var(--con-raise);
+  font-size: 11px;
+}
+
+.share-agent i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.share-agent code {
+  color: var(--con-faint);
+  font-size: 10px;
+}
+
+.share-attach {
+  display: inline-flex;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.share-attach select {
+  padding: 2px 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.share-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--rule);
+}
+
+.share-foot .view-button {
+  flex: none;
+}
+
+.share-foot p {
+  margin: 0;
+  color: var(--con-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* The one filled button in the title bar. It earns that weight: sharing is
+   the action a demo is built around, and it is the first thing a visitor
+   looks for after opening a document. */
+.share-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 11px;
+  background: var(--accent);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.share-button:hover:not(:disabled) {
+  background: var(--purple-dark);
+  border-color: var(--purple-dark);
+}
+
+.share-button:disabled {
+  border-color: var(--rule-strong);
+  background: transparent;
+  color: var(--con-faint);
+  cursor: default;
+}
+
+.share-button .codicon {
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------- shared with me ---
+ * The recipient's inbox, rendered above the warrant list in the Share &
+ * access panel. It follows that list's idiom rather than inventing one: rows
+ * are full-bleed with their own padding and a hairline between them, and the
+ * scopes a grant carries use the same .scope badge the warrants below use.
+ * The two are one continuous panel - a share and the warrant it mints should
+ * not look like two different kinds of thing.
+ */
+
+.inbox {
+  border-bottom: 1px solid var(--rule);
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.inbox-count {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--list-active-fg, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border-top: 1px solid var(--rule);
+}
+
+/* An unarmed grant is the row that wants a click, so it is the row that gets
+   the accent edge - not the one that is already working. Drawn inset so the
+   row's text stays on the same left edge as every other row in the panel. */
+.inbox-row[data-armed="false"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.inbox-doc {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.inbox-doc:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.inbox-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.inbox-agents,
+.inbox-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inbox-arm {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.inbox-row .share-attach {
+  display: flex;
+  gap: 6px;
+  margin-left: 0;
+}
+
+.inbox-row .share-attach select {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-return {
+  align-self: flex-start;
+  font-size: 10.5px;
+}

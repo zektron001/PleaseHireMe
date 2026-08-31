@@ -88,11 +88,27 @@ export interface PlannedTask {
   splitter?: string;
 }
 
+/**
+ * Where an Agent's last committed edit ended.
+ *
+ * Computed by CONCORD from the diff it already runs to attribute lines, so it
+ * is a fact about a commit rather than about a keystroke. `atVersion` is the
+ * revision it refers to, which is what makes a stale caret legible instead of
+ * misleading.
+ */
+export interface Caret {
+  line: number;
+  column: number;
+  atVersion: number;
+}
+
 export interface PresenceEntry {
   agentId: string;
   humanId: string | null;
   activity: "viewing" | "editing";
   at: number;
+  /** Absent until that Agent has committed at least once. */
+  caret?: Caret;
 }
 
 export interface ConcordDoc {
@@ -270,6 +286,26 @@ export interface BlameLine {
   message: string | null;
 }
 
+/**
+ * One accepted write. This is the commit object of this platform: there is no
+ * git, so the Source Control view is built from these plus `DocView.history`.
+ * `summary` is the Agent's own `CONCORD-COMMIT:` line - see concord/checkpoint.ts.
+ */
+export interface AgentContribution {
+  id: string;
+  documentId: string;
+  agentId: string;
+  humanId: string | null;
+  runId: string | null;
+  baseVersion: number;
+  resultingVersion: number;
+  outcome: "written" | "merged";
+  changedLineIds: string[];
+  summary: string;
+  createdAt: string;
+  caret?: { line: number; column: number };
+}
+
 export interface BlameView {
   id: string;
   version: number;
@@ -398,4 +434,47 @@ export interface AccessWarrant {
   revokedReason: string | null;
   live: boolean;
   revocableByViewer: boolean;
+}
+
+/* ------------------------------------------------------- sharing --- */
+// The Google Docs surface over WARRANT. A grant is an ACL row naming two
+// humans and confers nothing on its own; authority appears only once the
+// GRANTEE attaches one of their own Agents and a warrant is minted for it.
+// See apps/server/src/warrant/sharing.ts for why it is built that way.
+
+export type ShareRole = "viewer" | "commenter" | "editor";
+
+/** One Agent the grantee brought, and the warrant minted for it. */
+export interface ShareAgent {
+  agentId: string;
+  warrantId: string;
+  live: boolean;
+  expiresAt: string;
+}
+
+export interface ShareGrant {
+  id: string;
+  docId: string;
+  role: ShareRole;
+  grantedBy: string;
+  grantedByName: string;
+  granteeId: string;
+  granteeName: string;
+  scopes: string[];
+  issuedAt: string;
+  expiresAt: string;
+  agents: ShareAgent[];
+}
+
+export interface DocSharing {
+  docId: string;
+  resource: string;
+  viewer: string;
+  /** False for a Viewer or Commenter: only writers may re-share. */
+  canShare: boolean;
+  /** The widest role the viewer may hand out. Attenuation, made visible. */
+  maxRole: ShareRole | null;
+  heldScopes: string[];
+  grants: ShareGrant[];
+  people: Human[];
 }

@@ -18,3 +18,9 @@ deploy/volcengine/terraform.tfvars
 
 # AEGIS protected asset (Track C). Never commit the demo vault.
 vault/
+.gstack/
+
+# Generated test runs. The Markdown report is committed; the raw
+# vitest JSON beside it is run output and is not.
+artifacts/tests/*.json
+artifacts/tests/REPORT.partial.md

@@ -1,43 +1,26 @@
 /*
- * The middleware console.
+ * The console surface.
  *
- * Deliberately not a second design system. It inherits the starter kit's paper
- * (--paper, --ink, --line) and adds one idea: this surface is a RECORD, not a
- * dashboard. So - hairline rules instead of cards, monospace for anything a
- * machine generated (ids, hashes, versions, rule ids), small-caps verdicts
- * instead of coloured pills, and no shadows anywhere. A judge should read it
- * the way they would read a printed audit trail.
+ * The workbench chrome that used to live at the top of this file - activity
+ * bar, rail, tabs, panel, status bar - now belongs to workbench.css. What is
+ * left here is the content INSIDE those frames: documents, blame, conflicts,
+ * the decision stream, review and the collaboration panels.
+ *
+ * These aliases were previously scoped to `.console`, which is no longer the
+ * root element, so they sit on :root now. Nothing below hardcodes a hex.
  */
 
-.console {
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+:root {
+  --mono: "Droid Sans Mono", "Cascadia Code", Menlo, Monaco, Consolas,
+    "Courier New", monospace;
   --allow: var(--con-allow);
   --deny: var(--con-deny);
   --contest: var(--con-contest);
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  height: 100vh;
-  background: var(--paper);
-  color: var(--ink);
 }
 
-/* ------------------------------------------------------------------ header */
 
-.console-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 18px 26px 14px;
-  border-bottom: 1px solid var(--rule-strong);
-}
 
-.console-title {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
+
 
 .console-title h1 {
   margin: 0;
@@ -52,14 +35,6 @@
   color: var(--muted);
 }
 
-.console-chain {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
 
 .chain-valid {
   color: var(--allow);
@@ -102,14 +77,17 @@
 
 /* ------------------------------------------------------------- task strip */
 
+/*
+ * The planner. It used to be a horizontal strip across the top of the console;
+ * it now lives in the Sessions view of the side bar, so it stacks.
+ */
 .task-strip {
   display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 26px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 14px;
   border-bottom: 1px solid var(--rule);
   font-size: 12px;
-  overflow-x: auto;
 }
 
 .task-strip .eyebrow {
@@ -121,14 +99,30 @@
 }
 
 .subtask-chip {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px 4px 10px;
+  gap: 6px;
+  padding: 6px 8px;
   border: 1px solid var(--rule-strong);
   border-radius: 2px;
   background: var(--con-raise-2);
+}
+
+.subtask-chip b {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.subtask-chip code {
+  grid-column: 2;
+}
+
+.subtask-chip button {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .subtask-chip b {
@@ -162,41 +156,50 @@
 
 .plan-form {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .plan-form input {
-  border: 0;
-  border-bottom: 1px solid var(--rule-strong);
-  background: none;
-  padding: 3px 2px;
+  width: 100%;
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 4px 6px;
   font-size: 12px;
-  min-width: 190px;
 }
 
 .plan-form input:focus {
-  outline: none;
-  border-bottom-color: var(--ink);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
 }
 
-/* ------------------------------------------------------------------ body */
-
-.console-body {
-  display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 340px;
-  min-height: 0;
+.plan-form button {
+  margin-top: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
+
+.plan-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 
 .console-body > * {
   min-height: 0;
   overflow-y: auto;
 }
 
-.rail {
-  border-right: 1px solid var(--rule);
-  padding: 14px 0;
-}
 
 .rail-label,
 .stream-label {
@@ -482,12 +485,6 @@
   margin-left: auto;
 }
 
-/* --------------------------------------------------------------- stream */
-
-.stream {
-  border-left: 1px solid var(--rule);
-  padding: 14px 0 40px;
-}
 
 .stream-empty {
   padding: 0 18px;
@@ -810,53 +807,11 @@
 }
 
 /* ------------------------------------------------------------ IDE chrome */
-/*
- * The console is an editor-shaped surface: several documents open at once,
- * Agents writing to them, and a stream of decisions underneath. That is the
- * shape an IDE already solved - an activity rail, tabs, a collapsible bottom
- * panel and a status bar - so it borrows that vocabulary rather than inventing
- * one. It is still the same record: hairline rules, monospace for machine
- * values, no shadows.
- */
 
-.console.ide {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
 
-.ide-main {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  min-height: 0;
-}
 
-.activitybar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding-top: 6px;
-  background: var(--chrome);
-  border-right: 1px solid var(--line);
-}
 
-.activity-item {
-  position: relative;
-  width: 44px;
-  height: 42px;
-  border: none;
-  background: transparent;
-  color: var(--con-faint);
-  font-size: 15px;
-  cursor: pointer;
-}
 
-.activity-item:hover {
-  color: var(--ink);
-}
-
-.activity-item[data-active="true"] {
-  color: var(--ink);
-}
 
 .activity-item[data-active="true"]::before {
   content: "";
@@ -868,23 +823,7 @@
   background: var(--accent);
 }
 
-.activity-badge {
-  position: absolute;
-  right: 7px;
-  top: 6px;
-  min-width: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--deny);
-  color: var(--paper);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-}
 
-.activity-spacer {
-  flex: 1;
-}
 
 /* Editor tabs -------------------------------------------------------------- */
 
@@ -895,31 +834,8 @@
   border-bottom: 1px solid var(--line);
 }
 
-.tab {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  border: none;
-  border-right: 1px solid var(--line);
-  border-top: 1px solid transparent;
-  background: transparent;
-  color: var(--con-dim);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  white-space: nowrap;
-  cursor: pointer;
-}
 
-.tab:hover {
-  color: var(--ink);
-}
 
-.tab[data-active="true"] {
-  background: var(--paper);
-  border-top-color: var(--accent);
-  color: var(--ink);
-}
 
 .tab-dot {
   width: 7px;
@@ -936,55 +852,12 @@
   background: var(--contest);
 }
 
-/* Bottom panel ------------------------------------------------------------- */
 
-.panel {
-  border-top: 1px solid var(--line);
-  background: var(--chrome-2);
-}
 
-.panel-tabs {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 12px;
-  height: 30px;
-}
 
-.panel-tab {
-  border: none;
-  border-bottom: 1px solid transparent;
-  background: transparent;
-  color: var(--con-dim);
-  font-size: 10.5px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  line-height: 29px;
-  cursor: pointer;
-}
 
-.panel-tab[data-active="true"] {
-  color: var(--ink);
-  border-bottom-color: var(--ink);
-}
 
-.panel-spacer {
-  flex: 1;
-}
 
-.panel-body {
-  overflow-y: auto;
-  height: 168px;
-  padding: 4px 0 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.panel-body[data-open="false"] {
-  height: 0;
-  padding: 0;
-  overflow: hidden;
-}
 
 .chain-row {
   display: grid;
@@ -1030,36 +903,10 @@
   white-space: nowrap;
 }
 
-/* Status bar --------------------------------------------------------------- */
 
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 22px;
-  padding: 0 12px;
-  background: var(--chrome);
-  border-top: 1px solid var(--line);
-  color: var(--con-dim);
-  font-size: 11px;
-}
 
-.statusbar b {
-  color: var(--ink);
-  font-weight: 600;
-}
 
-.statusbar .ok {
-  color: var(--allow);
-}
 
-.statusbar .bad {
-  color: var(--deny);
-}
-
-.statusbar-spacer {
-  flex: 1;
-}
 
 .theme-toggle {
   border: 1px solid var(--rule);
@@ -2002,9 +1849,6 @@
   }
 }
 
-.tab-back {
-  color: var(--muted);
-}
 
 .tab-close {
   margin-left: 6px;

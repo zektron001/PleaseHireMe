@@ -29,6 +29,10 @@ export AEGIS_VAULT_PATH="${AEGIS_VAULT_PATH:-$repo/.vault}"
 
 mkdir -p "$APP_DATA_DIR" "$AGENT_WORKSPACE_ROOT" "$CODEX_HOME"
 
+# Expanded below as ${env_flag[@]+"${env_flag[@]}"} rather than "${env_flag[@]}".
+# macOS ships bash 3.2, where expanding an EMPTY array under `set -u` is an
+# "unbound variable" error; bash 4.4 fixed it. So the plain form works on Linux
+# and kills the server on any Mac whose checkout has no credentials file.
 env_flag=()
 if [[ -f "$repo/.env" ]]; then
   env_flag=(--env-file-if-exists="$repo/.env")
@@ -36,6 +40,6 @@ fi
 
 cd "$repo/apps/server"
 if [[ "$mode" == "start" ]]; then
-  exec node "${env_flag[@]}" dist/index.js
+  exec node ${env_flag[@]+"${env_flag[@]}"} dist/index.js
 fi
-exec npx tsx watch "${env_flag[@]}" src/index.ts
+exec npx tsx watch ${env_flag[@]+"${env_flag[@]}"} src/index.ts

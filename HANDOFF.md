@@ -145,9 +145,16 @@ file as "uncommitted WIP" was in fact committed in `5978fd0`, and is now
 finished: it publishes from all three runner call sites (`/run`, consultation,
 re-iteration), streams over SSE at `/api/live/stream`, and has a UI panel.
 
-Deliberately excluded, and it should stay excluded: character-level cursors and
-a typing animation. The runtime reports completed items, not keystrokes, so
-either would be fabricated. Document-level presence is what the backend knows.
+Still deliberately excluded: a typing animation, and any interpolation of a
+caret between two committed positions. The runtime reports completed items, not
+keystrokes, so both would be fabricated.
+
+**Character-level carets are no longer in that list** (2026-08-31, R19). They
+are not a keystroke position: `reconcileProvenance` already diffs previous
+against next content inside the commit critical section, so the line number and
+the column of where a commit ENDED are arithmetic over data the store holds. The
+caret jumps when a commit lands and never moves in between. See
+`AMOEBA_INSPIRATION_SCOPE.md` §5 and `apps/web/src/editor/decorations.ts`.
 
 ## 7. The Instagram-reel scorecard, honestly
 
@@ -166,13 +173,27 @@ The build proves the hard half and not the theatrical half.
 
 ## 8. Where to look for the new UI
 
-`apps/web/src/Console.tsx` is the shell. The pieces it composes:
+`apps/web/src/Console.tsx` is the shell - now a VS Code-shaped workbench (R17).
+The chrome lives in `apps/web/src/shell/` (`TitleBar`, `StatusBar`, `Sash`,
+`CommandPalette`, `commands.ts`, `Codicon`) and `workbench.css`; the Dark+/Light+
+palette is a token retarget in `vscode.css`, because `console.css` hardcodes no
+colours. The pieces Console composes:
 
 | File | What |
 | --- | --- |
 | `Sessions.tsx` | session cards — the dashboard view |
 | `Collab.tsx` | People, Subagents, Queue, Usage, Access, and Agent Live |
-| `Code.tsx` | line numbers, syntax colour, blame gutter, selection |
+| `editor/CodeEditor.tsx` | Monaco (R18). Blame, comments, conflicts and carets are decorations in `editor/decorations.ts`. Owns no network call - saving is the `onRequestSave` prop |
+| `views/ExplorerView.tsx` | the file tree, derived from doc ids |
+| `views/SourceControlView.tsx` | CONCORD revisions as source control |
+| `views/AgentsView.tsx` + `AgentChat.tsx` + `CreateAgentDialog.tsx` | the starter kit's Agents, in the shell. Logic in `state/useAgents.ts`, moved verbatim from App.tsx |
+
+The editor is **read-only until the human write path lands** - `CodeEditor` locks
+itself when no `onRequestSave` prop is passed, so nobody can type into a buffer
+that would be silently dropped. The contract for whoever builds it, including the
+missing stop route (R20), is [docs/EDITOR_SEAM.md](docs/EDITOR_SEAM.md).
+
+| `Code.tsx` | superseded by Monaco; kept only for its `Selection` type |
 | `participants.ts` | the per-participant colour derived from an id |
 | `console.css` | one appended section, from `Collaboration surface` down |
 

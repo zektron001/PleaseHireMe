@@ -33,6 +33,7 @@ import {
   reconcileProvenance,
   seedProvenance,
   type AgentContribution,
+  type Caret,
   type LineProvenance,
 } from "./provenance.js";
 
@@ -79,6 +80,12 @@ export interface PresenceEntry {
   readonly humanId: string | null;
   readonly activity: "viewing" | "editing";
   readonly at: number;
+  /**
+   * Where this Agent's last commit ENDED - not where a cursor is. See the
+   * `Caret` docs in provenance.ts. Absent until it has committed once, and it
+   * expires with the rest of presence on the 15s TTL.
+   */
+  readonly caret?: Caret & { readonly atVersion: number };
 }
 
 /**
@@ -340,6 +347,7 @@ export class SharedDocStore {
     agentId: string,
     humanId: string | null,
     activity: PresenceEntry["activity"],
+    caret?: PresenceEntry["caret"],
   ): void {
     let onDoc = this.presence.get(docId);
     if (!onDoc) {
@@ -353,11 +361,15 @@ export class SharedDocStore {
     const editing =
       activity === "editing" ||
       (current?.activity === "editing" && current.at > this.now() - PRESENCE_TTL_MS);
+    const kept = caret ?? current?.caret;
     onDoc.set(agentId, {
       agentId,
       humanId,
       activity: editing ? "editing" : "viewing",
       at: this.now(),
+      // A read must not erase the caret a write put here, so the previous one
+      // is carried forward whenever this call does not bring a newer one.
+      ...(kept ? { caret: kept } : {}),
     });
   }
 
@@ -546,7 +558,18 @@ export class SharedDocStore {
           changedLineIds: updated.changedLineIds,
           summary: summariseContribution(options?.message, updated.changedLineIds.length),
           createdAt: doc.updatedAt,
+          ...(updated.caret ? { caret: updated.caret } : {}),
         });
+
+        // Presence is re-marked here, AFTER the commit, so it can carry where
+        // that commit ended. The earlier mark() on entry only establishes that
+        // this Agent is editing at all.
+        if (updated.caret) {
+          this.mark(docId, agentId, verdict.humanId, "editing", {
+            ...updated.caret,
+            atVersion: doc.version,
+          });
+        }
 
         doc.history.push({
           version: doc.version,

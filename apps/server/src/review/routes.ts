@@ -14,7 +14,9 @@ import { HttpError } from "../errors.js";
 import type { AgentRunner } from "../types.js";
 import type { WarrantPlane } from "../warrant/index.js";
 import type { HumanPrincipal } from "../warrant/types.js";
-import { bearerToken, requireAgentOf } from "../warrant/access.js";
+import { bearerToken, isOrchestrator, requireAgentOf } from "../warrant/access.js";
+import { heldScopes } from "../warrant/sharing.js";
+import { docResource } from "../concord/store.js";
 import { ConsultationService } from "./consultation.js";
 import { runReiteration } from "./reiteration.js";
 import { ReviewService } from "./service.js";
@@ -130,6 +132,27 @@ export async function registerReviewRoutes(
     const human = requireHuman(request);
     const { docId } = docParams.parse(request.params);
     const body = createCommentBody.parse(request.body);
+
+    // A human comments in their own name here, so there is no Agent whose
+    // warrant the PDP could read. The equivalent question is asked directly:
+    // does this human hold comment:write on this document, through any live
+    // warrant of theirs? That is what separates a Viewer from a Commenter -
+    // without it the role picker would offer a distinction the server does
+    // not keep, which is worse than not offering it at all.
+    if (!isOrchestrator(human) && !heldScopes(plane.registry, human.id, docId).has("comment:write")) {
+      plane.record({
+        humanId: human.id,
+        agentId: null,
+        action: "comment.write",
+        resource: docResource(docId),
+        decision: "Deny",
+        ruleId: "WB-4.scope-not-granted",
+        reason: "You hold read access to this document but not comment:write",
+        warrantId: null,
+      });
+      throw new HttpError(403, "You may read this document but not comment on it");
+    }
+
     const comment = review.createComment({
       docId,
       startLine: body.startLine,

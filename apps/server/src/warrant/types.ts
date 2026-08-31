@@ -36,25 +36,39 @@ export type WarrantScope =
   | "workspace:read"
   | "workspace:write"
   | "model:invoke"
-  | "merge:propose";
+  | "merge:propose"
+  | "comment:write";
 
 export type WarrantAction =
   | "workspace.read"
   | "workspace.write"
   | "merge.propose"
   | "merge.integrate"
-  | "task.read";
+  | "task.read"
+  | "comment.write";
 
 /**
- * A scoped, time-bound, revocable grant from one human to one Agent, for one
- * subtask, over an explicit resource set. Absence of a warrant is absence of
- * authority - there is no ambient permission anywhere in this design.
+ * Where a warrant came from. `subtask` warrants are minted by the orchestrator
+ * when a task is fanned out; `share` warrants are minted when one human shares
+ * a document with another. Both are decided by the same PDP - sharing is a way
+ * to obtain a warrant, never a way to act without one.
+ */
+export type WarrantOrigin = "subtask" | "share";
+
+/**
+ * A scoped, time-bound, revocable grant from one human to one Agent, over an
+ * explicit resource set. Absence of a warrant is absence of authority - there
+ * is no ambient permission anywhere in this design.
  */
 export interface Warrant {
   readonly id: string;
   readonly humanId: string;
   readonly agentId: string;
+  /** For a share warrant this is the grant id, not a subtask id. */
   readonly subtaskId: string;
+  readonly origin: WarrantOrigin;
+  /** The human who delegated this, when it came from a share. */
+  readonly grantedBy: string | null;
   readonly scopes: readonly WarrantScope[];
   /** Canonical resource ids this warrant covers. Nothing else is reachable. */
   readonly resources: readonly string[];
@@ -123,4 +137,53 @@ export interface Session {
   readonly token: string;
   readonly humanId: string;
   readonly issuedAt: string;
+}
+
+/* ------------------------------------------------------------------ sharing */
+
+/**
+ * The three roles a document can be shared at, in the order they widen.
+ *
+ * Deliberately the Google Docs vocabulary, because that is the mental model
+ * every developer already has. What is NOT borrowed is "anyone with the link":
+ * a link is not a principal, so it cannot be named in a warrant, and a grant
+ * that cannot name its holder cannot be revoked from them. See ShareGrant.
+ */
+export type ShareRole = "viewer" | "commenter" | "editor";
+
+export const SHARE_ROLES: readonly ShareRole[] = ["viewer", "commenter", "editor"];
+
+/**
+ * The scopes each role carries. Every role is a strict superset of the one
+ * before it, which is what lets `atMost` compare two roles by scope count
+ * rather than by a hand-maintained ordering table.
+ */
+export const SCOPES_FOR_ROLE: Record<ShareRole, readonly WarrantScope[]> = {
+  viewer: ["workspace:read"],
+  commenter: ["workspace:read", "comment:write"],
+  editor: ["workspace:read", "comment:write", "workspace:write", "merge:propose"],
+};
+
+/**
+ * One human sharing one document with another, at a role, until an expiry.
+ *
+ * A grant is the ACL entry. It is not authority on its own: authority appears
+ * only when the grantee attaches one of their OWN Agents to it and a warrant is
+ * minted for that Agent. That indirection is the point - it is what lets a
+ * collaborator bring their own Agent without the sharer ever holding, naming,
+ * or being able to impersonate it.
+ */
+export interface ShareGrant {
+  readonly id: string;
+  readonly docId: string;
+  /** The human who shared. Always taken from a session, never from a body. */
+  readonly grantedBy: string;
+  readonly granteeId: string;
+  readonly role: ShareRole;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  /** Warrants minted from this grant, one per Agent the grantee attached. */
+  agentWarrantIds: string[];
+  revokedAt: string | null;
+  revokedReason: string | null;
 }

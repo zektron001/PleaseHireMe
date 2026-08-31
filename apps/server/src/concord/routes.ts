@@ -31,6 +31,13 @@ const writeBody = z.object({
   agentId: z.string().trim().min(1),
   expectedVersion: z.number().int().nonnegative(),
   content: z.string().max(1_000_000),
+  /**
+   * What this write is for, in one line - the same thing an Agent supplies
+   * through `CONCORD-COMMIT:` at the end of a turn. Without it a write made
+   * over HTTP (a human saving from the editor, say) can only ever be titled
+   * "n lines changed" in the Source Control view. store.ts bounds it.
+   */
+  message: z.string().trim().max(500).optional(),
 });
 const leaseBody = z.object({
   agentId: z.string().trim().min(1),
@@ -119,6 +126,7 @@ export async function registerConcordRoutes(
       body.agentId,
       body.expectedVersion,
       body.content,
+      body.message === undefined ? undefined : { message: body.message },
     );
 
     // Each outcome gets the status code that describes it, so a client can tell

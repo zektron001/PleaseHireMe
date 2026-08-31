@@ -33,6 +33,9 @@ const AGENT_SCOPES: readonly WarrantScope[] = [
   "workspace:write",
   "model:invoke",
   "merge:propose",
+  // A subtask Agent could always leave review comments; that only became a
+  // named scope when sharing needed to hand it out without handing out write.
+  "comment:write",
 ];
 
 export interface PlanInput {

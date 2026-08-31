@@ -166,7 +166,7 @@ button {
   grid-template-columns: 276px minmax(0, 1fr);
 }
 
-.sidebar {
+.app-shell > .sidebar {
   min-height: 100vh;
   padding: 24px 18px;
   background: #242421;
@@ -440,7 +440,7 @@ button {
   letter-spacing: 0.14em;
 }
 
-.main {
+.app-shell > .main {
   min-width: 0;
   min-height: 100vh;
   padding: 22px 34px 34px;
@@ -1206,264 +1206,14 @@ textarea:focus {
  * removes dark mode from the Playground and changes nothing else.
  */
 
+/*
+ * Kept: the unlock screen, which is still on the main path into the
+ * workbench. Everything else in this block existed only to give the classic
+ * Playground a dark mode, and the Playground's journey now lives in the shell
+ * as Run and Debug - see views/RunView.tsx and views/AgentChat.tsx, which are
+ * built on the tokens and need no per-class overrides at all.
+ */
+
 :root[data-theme="dark"] .auth-screen {
   background: radial-gradient(circle at top, #0c0726, #1b1a14 45%);
-}
-
-:root[data-theme="dark"] .sidebar {
-  background: #31312d;
-  color: #f0ede5;
-  border-right: 1px solid #464641;
-}
-
-:root[data-theme="dark"] .brand-mark {
-  background: linear-gradient(145deg, #150f37, #211b3e);
-}
-
-:root[data-theme="dark"] .brand span {
-  color: #babab6;
-}
-
-:root[data-theme="dark"] .button-ghost {
-  background: #1c1a14;
-  color: #b9bab5;
-}
-
-:root[data-theme="dark"] .button-ghost:hover:not(:disabled) {
-  background: #1f1d17;
-}
-
-:root[data-theme="dark"] .button-danger {
-  background: #20110f;
-  color: #cda2a2;
-}
-
-:root[data-theme="dark"] .button-danger:hover:not(:disabled) {
-  background: #231311;
-}
-
-:root[data-theme="dark"] .create-button {
-  background: #1c163b;
-}
-
-:root[data-theme="dark"] .console-link {
-  border: 1px solid #4e4e48;
-  color: #d8d7cf;
-}
-
-:root[data-theme="dark"] .console-link:hover {
-  border-color: #5a5a53;
-  color: #ebebeb;
-}
-
-:root[data-theme="dark"] .sidebar-label {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .agent-card:hover {
-  background: #3d3d38;
-}
-
-:root[data-theme="dark"] .agent-card.selected {
-  background: #45433f;
-  border-color: #585751;
-  box-shadow: inset 3px 0 #161039;
-}
-
-:root[data-theme="dark"] .agent-avatar {
-  color: #e0daf9;
-  background: #514865;
-}
-
-:root[data-theme="dark"] .agent-card-copy strong {
-  color: #edebe4;
-}
-
-:root[data-theme="dark"] .agent-card-copy span {
-  color: #babab6;
-}
-
-:root[data-theme="dark"] .mini-dot {
-  background: #595954;
-}
-
-:root[data-theme="dark"] .mini-ready, :root[data-theme="dark"] .mini-busy {
-  background: #1b382d;
-}
-
-:root[data-theme="dark"] .mini-error {
-  background: #371614;
-}
-
-:root[data-theme="dark"] .empty-sidebar {
-  color: #babab6;
-  border: 1px dashed #54544e;
-}
-
-:root[data-theme="dark"] .runtime-card {
-  border: 1px solid #4e4e48;
-  background: #373732;
-}
-
-:root[data-theme="dark"] .runtime-card > span:last-child {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .eyebrow {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .main {
-  background:
-    radial-gradient(circle at 86% -10%, rgba(105, 84, 217, 0.09), transparent 30%),
-    #1b1a14;
-}
-
-:root[data-theme="dark"] .config-banner {
-  color: #d6c49a;
-  background: #292207;
-  border: 1px solid #2f2811;
-}
-
-:root[data-theme="dark"] .config-banner > span {
-  background: #776236;
-}
-
-:root[data-theme="dark"] .error-banner {
-  color: #cda2a2;
-  background: #220f0c;
-  border: 1px solid #281311;
-}
-
-:root[data-theme="dark"] .status {
-  background: #1d1c18;
-  color: #b9bab5;
-}
-
-:root[data-theme="dark"] .status-ready {
-  color: #9ed1bc;
-  background: #11211b;
-}
-
-:root[data-theme="dark"] .status-busy {
-  color: #a89fd0;
-  background: #100b24;
-}
-
-:root[data-theme="dark"] .status-error {
-  color: #cea2a2;
-  background: #23110f;
-}
-
-:root[data-theme="dark"] .settings-title button, :root[data-theme="dark"] .modal-heading button {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] label {
-  color: #babab5;
-}
-
-:root[data-theme="dark"] input, :root[data-theme="dark"] textarea {
-  border: 1px solid #201f1a;
-}
-
-:root[data-theme="dark"] input:focus, :root[data-theme="dark"] textarea:focus {
-  border-color: #181236;
-}
-
-:root[data-theme="dark"] .panel-footer code {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .playground-topbar {
-  border-bottom: 1px solid #1e1c17;
-}
-
-:root[data-theme="dark"] .session-info {
-  color: #b9bab5;
-  border: 1px solid #1f1e18;
-}
-
-:root[data-theme="dark"] .pulse {
-  background: #1f3a2e;
-}
-
-:root[data-theme="dark"] .messages {
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.52)),
-    radial-gradient(circle at 20% 0, #100d20, transparent 38%);
-}
-
-:root[data-theme="dark"] .welcome-orbit {
-  border: 1px solid #130f25;
-}
-
-:root[data-theme="dark"] .welcome-orbit::before, :root[data-theme="dark"] .welcome-orbit::after {
-  border: 1px solid #120f22;
-}
-
-:root[data-theme="dark"] .welcome-orbit::after {
-  background: #1a1339;
-  box-shadow: -52px 35px 0 #150f2d;
-}
-
-:root[data-theme="dark"] .welcome-orbit div {
-  background: linear-gradient(145deg, #171037, #1f193c);
-}
-
-:root[data-theme="dark"] .welcome > p {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .prompt-grid button {
-  border: 1px solid #1f1e18;
-  color: #b9bab5;
-}
-
-:root[data-theme="dark"] .prompt-grid button:hover {
-  border-color: #17122f;
-}
-
-:root[data-theme="dark"] .message-meta span {
-  color: #babab6;
-}
-
-:root[data-theme="dark"] .message-body {
-  color: #b9bab6;
-}
-
-:root[data-theme="dark"] .message-user .message-body {
-  background: #0f0b24;
-  color: #aca5ca;
-  border: 1px solid #120d26;
-}
-
-:root[data-theme="dark"] .message-assistant .message-body {
-  border-left: 2px solid #191336;
-}
-
-:root[data-theme="dark"] .thinking-row {
-  color: #b9b9b6;
-}
-
-:root[data-theme="dark"] .run-error {
-  background: #210f0d;
-  color: #cba4a4;
-}
-
-:root[data-theme="dark"] .composer {
-  border-top: 1px solid #1f1d18;
-  background: #1c1911;
-}
-
-:root[data-theme="dark"] .composer-footer > span {
-  color: #babab5;
-}
-
-:root[data-theme="dark"] .send-button:disabled {
-  background: #21201d;
-}
-
-:root[data-theme="dark"] .no-agent-art {
-  background: linear-gradient(145deg, #160f36, #433974);
 }

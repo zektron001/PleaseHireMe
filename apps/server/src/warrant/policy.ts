@@ -48,6 +48,7 @@ const SCOPE_FOR: Record<WarrantAction, WarrantScope | null> = {
   "merge.propose": "merge:propose",
   "merge.integrate": null, // orchestrator-only, governed by WB-7/WB-8
   "task.read": null,
+  "comment.write": "comment:write",
 };
 
 function decide(
