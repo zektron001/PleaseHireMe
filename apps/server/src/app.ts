@@ -110,7 +110,14 @@ export async function createApp(
     service: "volc-agent-launchpad",
   }));
 
-  app.get("/api/auth", async () => ({ required: config.authToken.length > 0 }));
+  app.get("/api/auth", async () => ({
+    required: config.authToken.length > 0,
+    // Only in the try-it build, and only when there is a token to hand over.
+    // See DEMO_TRY_MODE in config.ts for why this is not a leak in that mode.
+    ...(config.demoTryMode && config.authToken.length > 0
+      ? { prefill: config.authToken }
+      : {}),
+  }));
 
   app.get("/api/system", async () => service.systemInfo());
 

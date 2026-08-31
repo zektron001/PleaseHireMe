@@ -78,12 +78,13 @@ export function AgentCard({
             ■ Stop
           </button>
         ) : (
-          <button className="button button-primary" onClick={onRun} disabled={busy}>
+          <button className="button button-primary" data-guide="run-task" onClick={onRun} disabled={busy}>
             ▶ Run task
           </button>
         )}
         <button
           className="ghost"
+          data-guide="approve-agent"
           onClick={onApprove}
           disabled={busy || working || approved}
           title={
@@ -163,6 +164,7 @@ export function AgentBoard({
 
         <button
           className="button button-merge"
+          data-guide="merge-all"
           disabled={busy || !session.readyToIntegrate || integrated}
           onClick={onIntegrate}
           title={

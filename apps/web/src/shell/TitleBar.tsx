@@ -144,6 +144,7 @@ export function TitleBar({
             <button
               key={human.id}
               className="whoami-chip"
+              data-guide={human.handle === "orchestrator" ? "signin-operator" : undefined}
               data-active={me?.id === human.id}
               onClick={() => onSignIn(human)}
               title={"Sign in as " + human.id}

@@ -78,6 +78,8 @@ import { TitleBar, type Menu } from "./shell/TitleBar";
 import { StatusBar, type StatusItem } from "./shell/StatusBar";
 import { CommandPalette } from "./shell/CommandPalette";
 import { matchKey, type Command } from "./shell/commands";
+import { Guide } from "./onboarding/Guide";
+import "./onboarding/guide.css";
 import "./console.css";
 import "./workbench.css";
 
@@ -206,6 +208,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
   const [showBlame, setShowBlame] = useState(true);
   const [theme, setTheme] = useState<ThemeChoice>(() => readChoice());
   const [panel, setPanel] = useState<Panel>("files");
+  const [guideOff, setGuideOff] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>("live");
   const [bottomOpen, setBottomOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -247,7 +250,15 @@ export default function Console({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     api
       .humans()
-      .then((result) => setHumans(result.humans))
+      .then((result) => {
+        // The try-it flow reads better with two principals, not three: one
+        // human who delegates, and you. The authorization story is unchanged -
+        // the operator still cannot run the Agent that acts for someone else.
+        const operator = result.humans.filter((h) => h.handle === "orchestrator");
+        const others = result.humans.filter((h) => h.handle !== "orchestrator");
+        const delegate = others.find((h) => h.handle === "bob") ?? others[0];
+        setHumans([...(delegate ? [delegate] : []), ...operator]);
+      })
       .catch(() => setHumans([]));
   }, []);
 
@@ -269,6 +280,8 @@ export default function Console({ onExit }: { onExit: () => void }) {
       const result = await api.signIn(human.handle);
       setSessionToken(result.token);
       setMe(result.human);
+      // Land where the first action is, not on an Explorer with nothing in it.
+      setPanel("sessions");
       setError(null);
       setLive([]);
       setBoard(null);
@@ -1028,6 +1041,91 @@ export default function Console({ onExit }: { onExit: () => void }) {
     }
   }, []);
 
+  /**
+   * The view switcher. Hoisted out of the editor branch on purpose: it used to
+   * live inside it, so picking any other view unmounted the only way back and
+   * you had to reopen a document from the Explorer to get the strip again.
+   */
+  const tabStrip = openTabs.length > 0 ? (
+
+                <div className="tabstrip" data-tour="tabstrip">
+                  <button
+                    className="tab tab-back"
+                    onClick={() => setView("dashboard")}
+                    data-active={view === "dashboard"}
+                    title="Back to sessions"
+                  >
+                    ▦
+                  </button>
+                  <button
+                    className="tab tab-back"
+                    onClick={() => setView("orchestration")}
+                    data-active={view === "orchestration"}
+                    title="Agents on this task - run, stop, approve, merge"
+                  >
+                    ◈
+                  </button>
+                  <button
+                    className="tab tab-back"
+                    onClick={() => setView("screens")}
+                    data-guide="view-screens"
+                    data-active={view === "screens"}
+                    title="Live screens - each Agent's own workspace copy"
+                  >
+                    ▶
+                  </button>
+                  {openTabs.map((tabId) => {
+                    const entry = docs.find((item) => item.id === tabId);
+                    return (
+                      <button
+                        key={tabId}
+                        className="tab"
+                        data-active={tabId === selected}
+                        onClick={() => { setSelected(tabId); setView("workspace"); }}
+                        title={tabId + (entry ? " · rev " + entry.version : "")}
+                      >
+                        <span className="tab-people">
+                          {(entry?.present ?? []).map((who) => (
+                            <i
+                              key={who.agentId}
+                              className="tab-dot"
+                              data-state={who.activity}
+                              style={{
+                                background: colorOf(who.humanId ?? who.agentId),
+                              }}
+                              title={
+                                (who.humanId ?? who.agentId) + " is " + who.activity
+                              }
+                            />
+                          ))}
+                          {entry && entry.conflicts > 0 && (
+                            <i className="tab-dot" data-state="conflict" />
+                          )}
+                        </span>
+                        {tabId.split("/").at(-1)}
+                        <span className="chain-seq">rev {entry?.version ?? "?"}</span>
+                        <span
+                          className="tab-close"
+                          role="button"
+                          tabIndex={-1}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOpenTabs((tabs) => tabs.filter((id) => id !== tabId));
+                            if (selected === tabId) {
+                              setSelected(
+                                openTabs.find((id) => id !== tabId) ?? null,
+                              );
+                            }
+                          }}
+                        >
+                          ×
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+  ) : null;
+
   return (
     <div
       className="workbench"
@@ -1157,7 +1255,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
             onChange={(event) => setShared(event.target.value)}
             placeholder="docs/CHANGELOG.md"
           />
-          <button className="button button-primary" disabled={busy === "plan"}>
+          <button className="button button-primary" data-guide="split-it" disabled={busy === "plan"}>
             {busy === "plan" ? "Planning…" : "Split it"}
           </button>
         </form>
@@ -1192,6 +1290,7 @@ export default function Console({ onExit }: { onExit: () => void }) {
                 {(board?.sessions ?? []).map((entry) => (
                   <button
                     key={entry.id}
+                    data-guide="explorer-doc"
                     className="doc-row"
                     data-active={entry.id === session}
                     onClick={() => {
@@ -1343,8 +1442,9 @@ export default function Console({ onExit }: { onExit: () => void }) {
         />
       </aside>
 
-      <main className="editor-area" data-tour="editor">
+      <main className="editor-area" data-tour="editor" data-guide="editor-surface">
           <div className="doc">
+            {tabStrip}
             {view === "chat" ? (
               playground.selected ? (
                 <AgentChat
@@ -1377,7 +1477,20 @@ export default function Console({ onExit }: { onExit: () => void }) {
                 }}
                 onIntegrate={() => {
                   const current = board?.sessions.find((entry) => entry.id === session);
-                  if (current) void guardAction("integrate", () => api.integrate(current.id));
+                  if (!current) return;
+                  // Merging is the end of the task, so land on the thing it
+                  // produced - the shared file, open and editable - rather than
+                  // leaving the operator on a board with nothing left to do.
+                  void guardAction("integrate", () => api.integrate(current.id)).then(() => {
+                    const merged = current.docs[0]?.id;
+                    if (merged) {
+                      setSelected(merged);
+                      setOpenTabs((tabs) =>
+                        tabs.includes(merged) ? tabs : [...tabs, merged],
+                      );
+                    }
+                    setView("workspace");
+                  });
                 }}
                 onToggleAuto={() => setAuto((value) => !value)}
               />
@@ -1405,80 +1518,6 @@ export default function Console({ onExit }: { onExit: () => void }) {
               />
             ) : (
               <>
-                {openTabs.length > 0 && (
-                  <div className="tabstrip" data-tour="tabstrip">
-                    <button
-                      className="tab tab-back"
-                      onClick={() => setView("dashboard")}
-                      title="Back to sessions"
-                    >
-                      ▦
-                    </button>
-                    <button
-                      className="tab tab-back"
-                      onClick={() => setView("orchestration")}
-                      title="Agents on this task - run, stop, approve, merge"
-                    >
-                      ◈
-                    </button>
-                    <button
-                      className="tab tab-back"
-                      onClick={() => setView("screens")}
-                      title="Live screens - each Agent's own workspace copy"
-                    >
-                      ▶
-                    </button>
-                    {openTabs.map((tabId) => {
-                      const entry = docs.find((item) => item.id === tabId);
-                      return (
-                        <button
-                          key={tabId}
-                          className="tab"
-                          data-active={tabId === selected}
-                          onClick={() => setSelected(tabId)}
-                          title={tabId + (entry ? " · rev " + entry.version : "")}
-                        >
-                          <span className="tab-people">
-                            {(entry?.present ?? []).map((who) => (
-                              <i
-                                key={who.agentId}
-                                className="tab-dot"
-                                data-state={who.activity}
-                                style={{
-                                  background: colorOf(who.humanId ?? who.agentId),
-                                }}
-                                title={
-                                  (who.humanId ?? who.agentId) + " is " + who.activity
-                                }
-                              />
-                            ))}
-                            {entry && entry.conflicts > 0 && (
-                              <i className="tab-dot" data-state="conflict" />
-                            )}
-                          </span>
-                          {tabId.split("/").at(-1)}
-                          <span className="chain-seq">rev {entry?.version ?? "?"}</span>
-                          <span
-                            className="tab-close"
-                            role="button"
-                            tabIndex={-1}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setOpenTabs((tabs) => tabs.filter((id) => id !== tabId));
-                              if (selected === tabId) {
-                                setSelected(
-                                  openTabs.find((id) => id !== tabId) ?? null,
-                                );
-                              }
-                            }}
-                          >
-                            ×
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
 
                 {!doc && <p className="doc-empty">Select a document.</p>}
                 {doc && selected && (
@@ -1816,6 +1855,20 @@ export default function Console({ onExit }: { onExit: () => void }) {
       </div>
 
       <StatusBar left={statusLeft} right={statusRight} />
+
+      <Guide
+        state={{
+          me,
+          humans,
+          session: activeSession,
+          view,
+          panel,
+          hasOpenDoc: Boolean(selected) && view === "workspace",
+          merged: activeSession?.state === "integrated",
+        }}
+        dismissed={guideOff}
+        onDismiss={() => setGuideOff(true)}
+      />
     </div>
   );
 }
