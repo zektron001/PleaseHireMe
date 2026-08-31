@@ -1429,17 +1429,14 @@ button.status-item:hover {
 
 /* ------------------------------------------------------- shared with me ---
  * The recipient's inbox, rendered above the warrant list in the Share &
- * access panel. It reuses .share-agent and .share-attach from the dialog
- * above, so an Agent chip looks the same wherever it appears; everything
- * else here is one narrow column, because the sidebar is not a dialog.
+ * access panel. It follows that list's idiom rather than inventing one: rows
+ * are full-bleed with their own padding and a hairline between them, and the
+ * scopes a grant carries use the same .scope badge the warrants below use.
+ * The two are one continuous panel - a share and the warrant it mints should
+ * not look like two different kinds of thing.
  */
 
 .inbox {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 12px;
-  margin-bottom: 12px;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -1448,6 +1445,7 @@ button.status-item:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 10px 12px 6px;
 }
 
 .inbox-count {
@@ -1462,17 +1460,16 @@ button.status-item:hover {
 .inbox-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  background: var(--paper);
+  gap: 7px;
+  padding: 12px;
+  border-top: 1px solid var(--rule);
 }
 
 /* An unarmed grant is the row that wants a click, so it is the row that gets
-   the accent edge - not the one that is already working. */
+   the accent edge - not the one that is already working. Drawn inset so the
+   row's text stays on the same left edge as every other row in the panel. */
 .inbox-row[data-armed="false"] {
-  border-left: 2px solid var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .inbox-doc {
@@ -1502,7 +1499,8 @@ button.status-item:hover {
   color: var(--muted);
 }
 
-.inbox-agents {
+.inbox-agents,
+.inbox-scopes {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -1518,6 +1516,7 @@ button.status-item:hover {
 .inbox-row .share-attach {
   display: flex;
   gap: 6px;
+  margin-left: 0;
 }
 
 .inbox-row .share-attach select {

@@ -117,15 +117,26 @@ export function SharedWithMe({
             </div>
 
             {live.length > 0 ? (
-              <div className="inbox-agents">
-                {live.map((entry) => (
-                  <span className="share-agent" key={entry.warrantId} title={"warrant " + entry.warrantId}>
-                    <i style={{ background: colorOf(entry.agentId) }} />
-                    {shortId(entry.agentId)}
-                    <code>{grant.scopes.join(" ")}</code>
-                  </span>
-                ))}
-              </div>
+              <>
+                <div className="inbox-agents">
+                  {live.map((entry) => (
+                    <span className="share-agent" key={entry.warrantId} title={"warrant " + entry.warrantId}>
+                      <i style={{ background: colorOf(entry.agentId) }} />
+                      {shortId(entry.agentId)}
+                    </span>
+                  ))}
+                </div>
+                {/* The same badge the warrant list below uses. Four scopes
+                    crammed into the chip itself wrapped into an unreadable
+                    block at sidebar width. */}
+                <div className="inbox-scopes">
+                  {grant.scopes.map((scope) => (
+                    <span className="scope" key={scope}>
+                      {scope}
+                    </span>
+                  ))}
+                </div>
+              </>
             ) : (
               <p className="inbox-arm">
                 Nothing can act on this yet. Attach one of your own Agents and a
@@ -136,7 +147,7 @@ export function SharedWithMe({
             <Attach
               agents={agents}
               busy={working}
-              label={live.length > 0 ? "Attach another Agent…" : "Bring your own Agent…"}
+              label={live.length > 0 ? "Add another…" : "Choose an Agent…"}
               onAttach={(agentId) => void attach(grant.id, agentId)}
             />
 
