@@ -18,6 +18,7 @@ import type {
   Session,
   Warrant,
   WarrantAgentPrincipal,
+  WarrantOrigin,
   WarrantScope,
 } from "./types.js";
 
@@ -28,6 +29,11 @@ export interface IssueWarrantInput {
   readonly scopes: readonly WarrantScope[];
   readonly resources: readonly string[];
   readonly ttlMs?: number;
+  /** Defaults to "subtask" so the orchestrator's call site is unchanged. */
+  readonly origin?: WarrantOrigin;
+  readonly grantedBy?: string;
+  /** Absolute expiry, when it must match a grant's rather than a TTL. */
+  readonly expiresAt?: string;
 }
 
 export const DEFAULT_WARRANT_TTL_MS = 3_600_000;
@@ -111,12 +117,14 @@ export class Registry {
       humanId: input.humanId,
       agentId: input.agentId,
       subtaskId: input.subtaskId,
+      origin: input.origin ?? "subtask",
+      grantedBy: input.grantedBy ?? null,
       scopes: [...input.scopes],
       resources: [...input.resources],
       issuedAt: new Date(issuedAt).toISOString(),
-      expiresAt: new Date(
-        issuedAt + (input.ttlMs ?? DEFAULT_WARRANT_TTL_MS),
-      ).toISOString(),
+      expiresAt:
+        input.expiresAt ??
+        new Date(issuedAt + (input.ttlMs ?? DEFAULT_WARRANT_TTL_MS)).toISOString(),
       revokedAt: null,
       revokedReason: null,
     };
@@ -138,6 +146,30 @@ export class Registry {
 
   listWarrants(): Warrant[] {
     return [...this.warrants.values()];
+  }
+
+  /** Every live warrant this human has delegated. The basis of attenuation. */
+  liveWarrantsForHuman(humanId: string): Warrant[] {
+    return [...this.warrants.values()].filter(
+      (warrant) => warrant.humanId === humanId && this.isLive(warrant),
+    );
+  }
+
+  /**
+   * Revocation driven by a grant rather than by a human, used when a share is
+   * withdrawn and every warrant minted from it has to fall with it.
+   *
+   * Deliberately NOT an ownership check: the caller has already proved it may
+   * revoke the grant, and the warrants below were minted by that grant rather
+   * than by the human who now holds them.
+   */
+  revokeById(id: string, reason: string): boolean {
+    const warrant = this.warrants.get(id);
+    if (!warrant) return false;
+    if (warrant.revokedAt) return true;
+    warrant.revokedAt = new Date(this.now()).toISOString();
+    warrant.revokedReason = reason;
+    return true;
   }
 
   /**

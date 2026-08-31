@@ -48,6 +48,18 @@ export function isOrchestrator(human: HumanPrincipal): boolean {
 /**
  * Confirms this human may act through this Agent, and audits the answer.
  *
+ * There are two ways to hold a delegation, and both are checked here:
+ *
+ *   a SUBTASK agent, minted when the orchestrator fanned a task out, and
+ *   a SHARE agent, which the human attached themselves to a grant somebody
+ *   else made them (see sharing.ts).
+ *
+ * The second is what makes "bring your own Agent" work. It deliberately reads
+ * the warrant registry rather than a share table: the question is not "was this
+ * person shared something" but "is there a LIVE warrant naming this Agent, held
+ * by this human" - so a revoked or expired share stops answering yes at the
+ * same instant the warrant behind it dies.
+ *
  * The orchestrator is allowed through because reviewing the whole fan-out is
  * its job; it still holds no workspace authority of its own, so every write it
  * names is decided by the PDP exactly as before (WB-7/WB-8).
@@ -58,7 +70,14 @@ export function requireAgentOf(
   agentId: string,
 ): Subtask | null {
   const subtask = plane.orchestrator.subtaskByAgent(agentId);
-  const allowed = isOrchestrator(human) || subtask?.ownerId === human.id;
+
+  // A live warrant this human holds over this Agent, from a share.
+  const shared = plane.registry
+    .liveWarrantsForHuman(human.id)
+    .find((warrant) => warrant.agentId === agentId && warrant.origin === "share");
+
+  const allowed =
+    isOrchestrator(human) || subtask?.ownerId === human.id || shared !== undefined;
 
   plane.record({
     humanId: human.id,
@@ -66,13 +85,19 @@ export function requireAgentOf(
     action: "workspace.read",
     resource: subtask ? "ws:" + subtask.id : "agent:" + agentId,
     decision: allowed ? "Allow" : "Deny",
-    ruleId: allowed ? "WB-0.acts-through-own-agent" : "WB-11.agent-not-delegated",
+    ruleId: allowed
+      ? shared && !subtask
+        ? "WB-0.acts-through-shared-agent"
+        : "WB-0.acts-through-own-agent"
+      : "WB-11.agent-not-delegated",
     reason: allowed
-      ? "The caller holds the delegation behind this Agent"
+      ? shared && !subtask
+        ? "A share from " + (shared.grantedBy ?? "another human") + " delegates this Agent"
+        : "The caller holds the delegation behind this Agent"
       : subtask
         ? "That Agent acts for " + subtask.ownerId + ", not for you"
         : "No delegation names that Agent",
-    warrantId: subtask?.warrantId ?? null,
+    warrantId: subtask?.warrantId ?? shared?.id ?? null,
   });
 
   if (!allowed) {

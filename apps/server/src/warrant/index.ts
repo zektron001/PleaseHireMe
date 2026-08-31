@@ -15,6 +15,7 @@ import type { Verdict } from "../aegis/types.js";
 import { authorize, type AuthzFacts } from "./policy.js";
 import { Orchestrator, ORCHESTRATOR_ID } from "./orchestrator.js";
 import { Registry } from "./registry.js";
+import { ShareRegistry } from "./sharing.js";
 import { createSplitter } from "./splitter.js";
 import { tiersFrom } from "./model-policy.js";
 import { SubtaskWorkspaceManager } from "./workspaces.js";
@@ -42,6 +43,8 @@ export class WarrantPlane {
   readonly docs: SharedDocStore;
   /** The runtime seam: shared files in and out of a workspace around each turn. */
   readonly reconciler: WorkspaceReconciler;
+  /** Document sharing - the ACL that mints warrants. See sharing.ts. */
+  readonly shares: ShareRegistry;
 
   private constructor(
     readonly registry: Registry,
@@ -58,6 +61,7 @@ export class WarrantPlane {
       onEvent: (event) => this.recordConcord(event),
     });
     this.reconciler = new WorkspaceReconciler(this.docs);
+    this.shares = new ShareRegistry(registry);
   }
 
   /**

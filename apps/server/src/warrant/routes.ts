@@ -18,6 +18,9 @@ import { HttpError } from "../errors.js";
 import { ORCHESTRATOR_ID, type WarrantPlane } from "./index.js";
 import type { HumanPrincipal } from "./types.js";
 import { workspaceResource } from "./resources.js";
+import { docResource } from "../concord/store.js";
+import { canShare, heldScopes, maxShareableRole } from "./sharing.js";
+import { SCOPES_FOR_ROLE, type ShareGrant } from "./types.js";
 import {
   parseCheckpoint,
   withCheckpointInstruction,
@@ -51,6 +54,26 @@ const runBody = z.object({
 const revokeBody = z.object({
   warrantId: z.string().trim().min(1),
   reason: z.string().trim().max(200).default("Revoked by owner"),
+});
+
+const docParams = z.object({ docId: z.string().trim().min(1).max(300) });
+const grantParams = z.object({ grantId: z.string().trim().min(1) });
+
+/**
+ * Note what is NOT in here: a granter id. The sharer is the session holder and
+ * nothing else, so the Track B success test - "changing a user ID in the
+ * browser request cannot bypass the authorization decision" - covers sharing
+ * for the same structural reason it covers everything else.
+ */
+const shareBody = z.object({
+  granteeId: z.string().trim().min(1).max(80),
+  role: z.enum(["viewer", "commenter", "editor"]),
+  ttlMs: z.number().int().min(60_000).max(2_592_000_000).optional(),
+});
+
+const attachBody = z.object({ agentId: z.string().trim().min(1).max(120) });
+const unshareBody = z.object({
+  reason: z.string().trim().max(200).default("Access removed by the sharer"),
 });
 
 /** The ONLY identity source in this module. */
@@ -418,6 +441,207 @@ export async function registerWarrantRoutes(
       chainValid: plane.audit.verify() === -1,
       events: visible.slice(-200),
     };
+  });
+
+  /* ------------------------------------------------------------- sharing */
+
+  /**
+   * Decorates a grant with the display data the share dialog needs, so the
+   * browser never has to join two lists to render one row.
+   */
+  const describe = (grant: ShareGrant) => ({
+    id: grant.id,
+    docId: grant.docId,
+    role: grant.role,
+    grantedBy: grant.grantedBy,
+    grantedByName: plane.registry.human(grant.grantedBy)?.displayName ?? grant.grantedBy,
+    granteeId: grant.granteeId,
+    granteeName: plane.registry.human(grant.granteeId)?.displayName ?? grant.granteeId,
+    scopes: SCOPES_FOR_ROLE[grant.role],
+    issuedAt: grant.issuedAt,
+    expiresAt: grant.expiresAt,
+    /** The Agents the grantee has attached. Empty until they bring one. */
+    agents: grant.agentWarrantIds
+      .map((id) => plane.registry.warrant(id))
+      .filter((warrant) => warrant !== null)
+      .map((warrant) => ({
+        agentId: warrant.agentId,
+        warrantId: warrant.id,
+        live: plane.registry.isLive(warrant),
+        expiresAt: warrant.expiresAt,
+      })),
+  });
+
+  /**
+   * Everything the share dialog renders for one document.
+   *
+   * Scoped, like every other listing here: you see a document's sharing state
+   * only if you already hold something on that document. An ACL readable by
+   * strangers is a directory of who to social-engineer.
+   */
+  app.get("/api/share/docs/:docId", async (request) => {
+    const human = requireHuman(request);
+    const { docId } = docParams.parse(request.params);
+
+    const held = heldScopes(plane.registry, human.id, docId);
+    const grant = plane.shares.forDocAndGrantee(docId, human.id);
+    if (held.size === 0 && !grant) {
+      throw new HttpError(403, "You do not have access to that document");
+    }
+
+    const maxRole = maxShareableRole(plane.registry, human.id, docId);
+    return {
+      docId,
+      resource: docResource(docId),
+      viewer: human.id,
+      /** What the viewer holds, so the dialog can disable what it must. */
+      canShare: maxRole !== null,
+      maxRole,
+      heldScopes: [...held],
+      grants: plane.shares.forDoc(docId).map(describe),
+      /** Candidates for the "add people" box, minus those already on it. */
+      people: plane.registry
+        .listHumans()
+        .filter((candidate) => candidate.id !== human.id)
+        .map((candidate) => ({
+          id: candidate.id,
+          handle: candidate.handle,
+          displayName: candidate.displayName,
+        })),
+    };
+  });
+
+  /** Documents other people have shared with me. The "Shared with me" list. */
+  app.get("/api/share/mine", async (request) => {
+    const human = requireHuman(request);
+    return {
+      viewer: human.id,
+      grants: plane.shares.forGrantee(human.id).map(describe),
+    };
+  });
+
+  /**
+   * Share a document. The interesting half is the denial: a caller who does not
+   * hold write on this document, or who asks for a role wider than their own,
+   * gets a 403 whose reason names the missing scopes - and that refusal is in
+   * the audit chain next to every other decision.
+   */
+  app.post("/api/share/docs/:docId", async (request, reply) => {
+    const human = requireHuman(request);
+    const { docId } = docParams.parse(request.params);
+    const body = shareBody.parse(request.body);
+
+    const decision = canShare(
+      plane.registry,
+      human.id,
+      body.granteeId,
+      docId,
+      body.role,
+    );
+    plane.record({
+      humanId: human.id,
+      agentId: null,
+      action: "workspace.write",
+      resource: docResource(docId),
+      decision: decision.allowed ? "Allow" : "Deny",
+      ruleId: decision.ruleId,
+      reason: decision.reason,
+      warrantId: null,
+    });
+    if (!decision.allowed) throw new HttpError(403, decision.reason);
+
+    const grant = plane.shares.grant({
+      docId,
+      grantedBy: human.id,
+      granteeId: body.granteeId,
+      role: body.role,
+      ...(body.ttlMs === undefined ? {} : { ttlMs: body.ttlMs }),
+    });
+    return reply.code(201).send({ grant: describe(grant) });
+  });
+
+  /**
+   * The grantee attaches one of their OWN Agents, and authority finally exists.
+   *
+   * Only the grantee may call this. If the sharer could attach an Agent on the
+   * grantee's behalf, the sharer would be choosing which Agent acts for someone
+   * else - which is the exact confusion the warrant model exists to prevent.
+   */
+  app.post("/api/share/grants/:grantId/agent", async (request, reply) => {
+    const human = requireHuman(request);
+    const { grantId } = grantParams.parse(request.params);
+    const { agentId } = attachBody.parse(request.body);
+
+    const grant = plane.shares.get(grantId);
+    if (!grant || !plane.shares.isLive(grant)) {
+      throw new HttpError(404, "No live grant with that id");
+    }
+    if (grant.granteeId !== human.id) {
+      plane.record({
+        humanId: human.id,
+        agentId,
+        action: "workspace.write",
+        resource: docResource(grant.docId),
+        decision: "Deny",
+        ruleId: "WB-16.attach-not-grantee",
+        reason: "Only the person a document was shared with may attach an Agent to it",
+        warrantId: null,
+      });
+      throw new HttpError(403, "That grant was not made to you");
+    }
+
+    const warrant = plane.shares.attachAgent(grantId, agentId);
+    if (!warrant) throw new HttpError(409, "That grant is no longer live");
+
+    plane.record({
+      humanId: human.id,
+      agentId,
+      action: "workspace.read",
+      resource: docResource(grant.docId),
+      decision: "Allow",
+      ruleId: "WB-0.share-agent-attached",
+      reason:
+        "Warrant minted from share " +
+        grant.id +
+        " at role " +
+        grant.role +
+        ", expiring with the grant",
+      warrantId: warrant.id,
+    });
+
+    return reply.code(201).send({ grant: describe(grant), warrantId: warrant.id });
+  });
+
+  /**
+   * Withdraw a share. The sharer may take access back; the grantee may hand it
+   * back. Nobody else can touch it, and every warrant the grant minted dies at
+   * the same instant - see ShareRegistry.revoke.
+   */
+  app.post("/api/share/grants/:grantId/revoke", async (request) => {
+    const human = requireHuman(request);
+    const { grantId } = grantParams.parse(request.params);
+    const { reason } = unshareBody.parse(request.body ?? {});
+
+    const grant = plane.shares.get(grantId);
+    if (!grant) throw new HttpError(404, "No grant with that id");
+
+    const allowed = grant.grantedBy === human.id || grant.granteeId === human.id;
+    plane.record({
+      humanId: human.id,
+      agentId: null,
+      action: "workspace.write",
+      resource: docResource(grant.docId),
+      decision: allowed ? "Allow" : "Deny",
+      ruleId: allowed ? "WB-0.unshare-party" : "WB-17.unshare-not-a-party",
+      reason: allowed
+        ? "A share may be withdrawn by either party to it"
+        : "You are neither the sharer nor the recipient of that grant",
+      warrantId: null,
+    });
+    if (!allowed) throw new HttpError(403, "That grant is not yours to revoke");
+
+    plane.shares.revoke(grantId, reason);
+    return { grant: describe(grant) };
   });
 
   app.log.info(
