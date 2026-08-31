@@ -19,6 +19,8 @@ services:
       AGENT_WORKSPACE_ROOT: /app/workspaces
       CODEX_HOME: /app/codex-home
       CODEX_SANDBOX_MODE: ${CODEX_SANDBOX_MODE:-workspace-write}
+      # Fills the access token in for the visitor. Local demo only.
+      DEMO_TRY_MODE: ${DEMO_TRY_MODE:-false}
     ports:
       - "${PUBLIC_PORT:-3000}:3000"
     volumes:

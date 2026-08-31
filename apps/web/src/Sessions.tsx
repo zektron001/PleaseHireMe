@@ -37,11 +37,12 @@ export function Sessions({
 
   return (
     <div className="sessions">
-      {sessions.map((session) => {
+      {sessions.map((session, index) => {
         const conflicts = session.docs.reduce((sum, doc) => sum + doc.conflicts, 0);
         return (
           <button
             className={"session-card" + (session.id === activeId ? " is-active" : "")}
+            data-guide={index === 0 ? "session-card" : undefined}
             key={session.id}
             onClick={() => onOpen(session)}
           >

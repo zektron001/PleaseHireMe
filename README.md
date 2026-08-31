@@ -63,6 +63,23 @@ Volcengine ECS.
 > [Track B](docs/WARRANT_TRACK_B.md#8-limitations-and-what-we-would-do-next) ·
 > [Track C](docs/MIDDLEWARE_ARCHITECTURE.md#12-residual-risks-and-limitations).
 
+## Try it in one line
+
+```bash
+./try.sh
+```
+
+Generates a `.env` if you have none, builds the image, starts it, waits for the
+control plane and prints the URL. Docker and Docker Compose v2 are the only
+prerequisites; the script is POSIX `sh`, so it runs the same on macOS and Linux.
+
+Open <http://localhost:3000>. The access token is filled in for you - press
+**Open Launchpad**, then follow the **Next** card in the bottom right, which
+names the one thing to do at each point, from signing in to a merged document.
+
+Put an `ARK_API_KEY` in `.env` before Agents can actually run a turn. Stop it
+with `docker compose down`.
+
 ## Screenshots
 
 ### Agent Playground

@@ -1,0 +1,61 @@
+/* The guided path. A ring on the thing to click, and a card that says why. */
+.guide-ring {
+  position: fixed;
+  z-index: 60;
+  border: 2px solid var(--accent, #2f6df6);
+  border-radius: 8px;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #2f6df6) 22%, transparent);
+  animation: guide-pulse 1.9s ease-in-out infinite;
+}
+@keyframes guide-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.guide-card {
+  position: fixed;
+  z-index: 61;
+  right: 18px;
+  bottom: 42px;
+  width: 320px;
+  padding: 14px 16px 15px;
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--rule-strong, #d6dae2);
+  box-shadow: 0 10px 34px rgba(10, 14, 22, 0.18);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.guide-card[data-tone="done"] { border-color: #16794a; }
+
+.guide-head { display: flex; align-items: center; justify-content: space-between; }
+.guide-kicker {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent, #2f6df6);
+}
+.guide-card[data-tone="done"] .guide-kicker { color: #16794a; }
+.guide-dismiss {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted, #6b7280);
+  padding: 0 2px;
+}
+.guide-card h3 { margin: 6px 0 4px; font-size: 14.5px; font-weight: 650; }
+.guide-card p { margin: 0 0 6px; color: var(--fg, #1c2128); }
+.guide-card .guide-why {
+  margin: 0;
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  border-top: 1px solid var(--rule, #e6e9ee);
+  padding-top: 6px;
+}
+
+/* The pre-filled token line on the unlock screen. */
+.auth-prefilled { color: #16794a; font-weight: 500; }

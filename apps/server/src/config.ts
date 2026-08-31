@@ -38,6 +38,17 @@ const envSchema = z.object({
     .max(128)
     .regex(/^[A-Za-z0-9._~-]*$/, "APP_AUTH_TOKEN must use URL-safe characters")
     .optional(),
+  /**
+   * The try-it build. Serves APP_AUTH_TOKEN to the browser so the unlock screen
+   * can pre-fill it and a first-time visitor gets in with one click. Only ever
+   * for a demo people are invited to run locally: anyone who can reach the
+   * server can already read the token this way, so the token stops being a
+   * secret the moment this is on. Off by default.
+   */
+  DEMO_TRY_MODE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   ARK_API_KEY: z.string().optional(),
   ARK_MODEL: z.string().optional(),
   ARK_BASE_URL: z
@@ -125,6 +136,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     containerUser: env.CONTAINER_USER?.trim() || defaultContainerUser,
     runtimeInstanceId: env.RUNTIME_INSTANCE_ID,
     authToken,
+    demoTryMode: env.DEMO_TRY_MODE,
     arkApiKey: env.ARK_API_KEY?.trim() ?? "",
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),

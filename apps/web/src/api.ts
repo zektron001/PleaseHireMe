@@ -85,7 +85,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  auth: () => request<{ required: boolean }>("/api/auth"),
+  auth: () => request<{ required: boolean; prefill?: string }>("/api/auth"),
   system: () => request<SystemInfo>("/api/system"),
   listAgents: () => request<{ agents: Agent[] }>("/api/agents"),
   createAgent: (body: {

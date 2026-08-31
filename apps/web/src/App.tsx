@@ -96,9 +96,11 @@ export default function App() {
     mountedRef.current = true;
     void api
       .auth()
-      .then(async ({ required }) => {
+      .then(async ({ required, prefill }) => {
         if (!mountedRef.current) return;
         setAuthRequired(required);
+        // The try-it build hands the token over so a first visit is one click.
+        if (prefill) setAuthInput(prefill);
         if (!required) await bootstrap();
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
@@ -296,7 +298,13 @@ export default function App() {
           <div className="brand-mark">A</div>
           <span className="eyebrow">Agent Launchpad</span>
           <h1>Enter the access token</h1>
-          <p>This shared demo token is configured by the platform operator.</p>
+          {authInput ? (
+            <p className="auth-prefilled">
+              Filled in for you — just press <strong>Open Launchpad</strong>.
+            </p>
+          ) : (
+            <p>This shared demo token is configured by the platform operator.</p>
+          )}
           {error && <div className="error-banner" role="alert">{error}</div>}
           <label>
             Access token
