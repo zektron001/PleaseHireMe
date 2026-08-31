@@ -63,6 +63,90 @@ Volcengine ECS.
 > [Track B](docs/WARRANT_TRACK_B.md#8-limitations-and-what-we-would-do-next) ·
 > [Track C](docs/MIDDLEWARE_ARCHITECTURE.md#12-residual-risks-and-limitations).
 
+## ⚠️ One switch decides the demo: `DEMO_MODE`
+
+**Read this before running anything.** There are two demos in this repository
+and one environment variable chooses between them. Nothing else needs to change.
+
+| | `DEMO_MODE=single` *(default)* | `DEMO_MODE=multi` |
+|---|---|---|
+| **The demo** | one computer | several computers |
+| **Binds to** | `127.0.0.1` — loopback | `0.0.0.0` — every interface |
+| **Who can reach it** | only this machine | anyone on the same network |
+| **Open** | `http://localhost:3000` | `http://<hostname>.local:3000` |
+| **`APP_AUTH_TOKEN`** | not required | **required**, 24+ characters |
+
+```bash
+npm start                      # single — one computer, unchanged
+DEMO_MODE=multi npm start      # multi  — reachable from other computers
+```
+
+**The server prints the exact URL to use, every time it starts:**
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  DEMO_MODE=multi  — reachable across the network                   │
+├────────────────────────────────────────────────────────────────────┤
+│  http://macbook-pro.local:3000   (other computers (mDNS))          │
+│    ↳ needs Bonjour (macOS) or Avahi (Linux) on both machines       │
+│  http://192.168.1.20:3000   (other computers (IP))                 │
+│  http://localhost:3000   (this computer)                           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### How `multi` works
+
+It uses **mDNS**, not a tunnel and not a hardcoded IP. macOS ships Bonjour and
+most Linux distributions ship Avahi, so every machine already answers to
+`<hostname>.local` on the local network. There is no new dependency, no daemon
+of ours, and **no external service** — nothing leaves your network. All the
+mode does is bind to every interface so that name leads somewhere, then print
+the URL to hand your teammates.
+
+**One computer is the server; the others are browser clients.** They install
+nothing. This system runs as a single process — `JsonStore` supports one process
+only, and the live activity bus is in-memory — so there is no peer-to-peer mode.
+
+### `multi` requires an auth token
+
+A server that executes agent code should not appear on a shared network without
+one. Set any 24+ character URL-safe string:
+
+```bash
+DEMO_MODE=multi APP_AUTH_TOKEN="$(openssl rand -hex 16)" npm start
+```
+
+Starting `multi` without it fails immediately with an error saying so, rather
+than quietly exposing an open server.
+
+> [!WARNING]
+> The shared token gates `/api/agents`. It deliberately does **not** gate
+> `/api/warrant/`, `/api/concord/`, `/api/review/`, `/api/live/` or `/api/share/`
+> — those carry per-human session tokens and authenticate themselves. Because
+> human sign-in is mock, anyone who can reach the server in `multi` mode can
+> open a session as `alice`, `bob` or the orchestrator. Use `multi` on a network
+> you trust, for as long as the demo lasts.
+
+### Troubleshooting `multi`
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `APP_AUTH_TOKEN must contain at least 24 characters…` | `multi` without a token | set `APP_AUTH_TOKEN` (above) |
+| Banner warns `DEMO_MODE=multi but HOST=127.0.0.1` | an explicit `HOST` overrode the mode | unset `HOST` — it always wins over the mode |
+| `<hostname>.local` does not resolve | no Avahi on the Linux client or server | `sudo apt install avahi-daemon`, or use the IP line from the banner |
+| Reachable by IP but not by name | mDNS blocked on the network | use the IP line |
+| Nothing reaches you at all | Wi-Fi client isolation, or running under WSL2 | see below |
+
+> [!NOTE]
+> **WSL2:** the server sits on a private NAT (`172.x`) that other machines
+> cannot route to, so `multi` alone is not enough. Either set
+> `networkingMode=mirrored` in `%USERPROFILE%\.wslconfig` and run
+> `wsl --shutdown`, or run the server on the host OS. macOS and native Linux
+> need none of this.
+
+`HOST` always wins when set explicitly — Docker Compose sets it, so Compose is
+unaffected by this switch.
+
 ## Screenshots
 
 ### Agent Playground
@@ -272,6 +356,8 @@ cp deploy/volcengine/terraform.tfvars.example \
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| **`DEMO_MODE`** | **`single`** | **`single` = one computer (loopback). `multi` = several computers (all interfaces + mDNS). [See above](#️-one-switch-decides-the-demo-demo_mode).** |
+| `HOST` | from `DEMO_MODE` | Explicit bind address. Always wins over `DEMO_MODE`. |
 | `ARK_API_KEY` | Required | Ark model API key. |
 | `ARK_MODEL` | Required | Responses-capable endpoint or model ID. |
 | `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. **Must match your key's region** - international keys need `https://ark.ap-southeast.volces.com/api/v3`. |

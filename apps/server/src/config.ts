@@ -3,7 +3,23 @@ import path from "node:path";
 import { z } from "zod";
 
 const envSchema = z.object({
-  HOST: z.string().default("0.0.0.0"),
+  /**
+   * Which demo this process is serving. The ONE switch between the two.
+   *
+   *   single  one computer. Binds loopback; nothing else on the network can
+   *           reach it. The original demo, and the default, because a server
+   *           that executes agent code should not appear on a shared network
+   *           by accident.
+   *   multi   several computers. Binds every interface so the `<host>.local`
+   *           name macOS (Bonjour) and Linux (Avahi) already answer to leads
+   *           somewhere. See apps/server/src/net/lan.ts.
+   *
+   * `HOST`, when set explicitly, always wins - Compose sets it, and a mode
+   * default must never silently override a deployment that asked for an
+   * address by name.
+   */
+  DEMO_MODE: z.enum(["single", "multi"]).default("single"),
+  HOST: z.string().optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.string().default("info"),
   APP_DATA_DIR: z.string().default(path.resolve(".data")),
@@ -83,11 +99,23 @@ export type AppConfig = ReturnType<typeof loadConfig>;
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
   const authToken = env.APP_AUTH_TOKEN?.trim() ?? "";
+  // An explicit HOST always wins; otherwise the demo mode picks the address.
+  // single -> loopback (nothing else can reach it), multi -> every interface.
+  const host = env.HOST?.trim() || (env.DEMO_MODE === "multi" ? "0.0.0.0" : "127.0.0.1");
   const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
-  if (env.NODE_ENV === "production" && !loopbackHosts.has(env.HOST)) {
+  if (env.NODE_ENV === "production" && !loopbackHosts.has(host)) {
     if (authToken.length < 24 || authToken.startsWith("replace-")) {
       throw new Error(
-        "APP_AUTH_TOKEN must contain at least 24 characters for a non-loopback production server",
+        "APP_AUTH_TOKEN must contain at least 24 characters for a non-loopback " +
+          "production server. This server is on " +
+          host +
+          (env.DEMO_MODE === "multi"
+            ? " because DEMO_MODE=multi, so other computers can reach it: an " +
+              "unauthenticated agent runner on a shared network is not something " +
+              "to start by accident."
+            : ".") +
+          " Set APP_AUTH_TOKEN to 24+ URL-safe characters, or use DEMO_MODE=single " +
+          "for the one-computer demo.",
       );
     }
   }
@@ -96,7 +124,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
       ? process.getuid() + ":" + process.getgid()
       : "1000:1000";
   return {
-    host: env.HOST,
+    demoMode: env.DEMO_MODE,
+    host,
     port: env.PORT,
     logLevel: env.LOG_LEVEL,
     dataDirectory: path.resolve(env.APP_DATA_DIR),

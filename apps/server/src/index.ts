@@ -1,4 +1,5 @@
 import path from "node:path";
+import os from "node:os";
 import { AgentService } from "./agent-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
@@ -8,6 +9,7 @@ import { WorkspaceManager } from "./workspace.js";
 import { Aegis } from "./aegis/index.js";
 import { reapAllRuntimeContainers } from "./aegis/reap.js";
 import { WarrantPlane } from "./warrant/index.js";
+import { startupBanner } from "./net/lan.js";
 
 const config = loadConfig();
 
@@ -60,3 +62,17 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
 await app.listen({ host: config.host, port: config.port });
+
+// Which URL to open, and which to send to a teammate. Printed to stderr rather
+// than through the logger because this is for the person at the terminal, not
+// for the log pipeline - and because the answer to "what do I type" should not
+// arrive as JSON.
+for (const line of startupBanner({
+  demoMode: config.demoMode,
+  host: config.host,
+  port: config.port,
+  hostname: os.hostname(),
+  interfaces: os.networkInterfaces(),
+})) {
+  process.stderr.write(line + "\n");
+}
