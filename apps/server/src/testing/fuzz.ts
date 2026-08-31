@@ -31,6 +31,28 @@ import type { Parameters } from "fast-check";
 export const DEFAULT_RUNS = 200;
 
 /**
+ * Why the campaign is 20,000 cases and not "run it overnight".
+ *
+ * Measured on 2026-08-31, same five property files, same machine:
+ *
+ *     200 cases/property (pinned)      0.5s      8 failures
+ *     20,000 cases/property            6s        9 failures   (+1)
+ *     ~3,000,000 cases/property        9m wall   9 failures   (+0)
+ *
+ * The third row is the point. Another 150x on top of the campaign found
+ * nothing the campaign had not already found, because fast-check samples
+ * blindly from the generators a property declares, and these generators -
+ * short strings, small arrays, bounded records - are exhausted long before
+ * the clock is. Hours are what COVERAGE-GUIDED fuzzing needs, because it is
+ * learning the input grammar from branch instrumentation as it goes. That is
+ * a different tool, and the honest target for it here is normalisePath, which
+ * is where the one case the pinned lane misses already lives.
+ *
+ * So: raise FUZZ_RUNS if the generators get wider. Raising it on today's
+ * generators buys CPU heat.
+ */
+
+/**
  * A positive integer from the environment, or null.
  *
  * Anything else - unset, empty, "abc", "0", "-1", "1e6" - is treated as unset
