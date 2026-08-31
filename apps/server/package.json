@@ -9,6 +9,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:audit": "vitest run security.test.ts contract.test.ts property.test.ts",
+    "test:baseline": "vitest run --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude '**/*.contract.test.ts' --exclude '**/*.property.test.ts' --exclude '**/security.test.ts' --exclude '**/client-contract.test.ts'",
+    "test:fuzz": "FUZZ_RUNS=${FUZZ_RUNS:-20000} FUZZ_TIME_MS=${FUZZ_TIME_MS:-15000} vitest run property.test --testTimeout=0",
     "start": "../../scripts/run-server.sh start"
   },
   "dependencies": {
@@ -19,6 +22,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.11",
+    "fast-check": "^4.9.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"
