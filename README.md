@@ -80,6 +80,35 @@ names the one thing to do at each point, from signing in to a merged document.
 Put an `ARK_API_KEY` in `.env` before Agents can actually run a turn. Stop it
 with `docker compose down`.
 
+## For reviewers
+
+Everything the brief asks for, in one place.
+
+| What | Where |
+| --- | --- |
+| **Setup, one line** | [`./try.sh`](try.sh) — see [Try it in one line](#try-it-in-one-line) |
+| **The middleware problem, and why** | [`docs/MASTER.md` §1](docs/MASTER.md) · the track statement at the top of this file |
+| **One-page architecture** | [`architecture_Diagram.md`](architecture_Diagram.md) — middleware, data flow, trust boundary, enforcement, instrumentation, recovery |
+| **Design summary** | [`docs/WARRANT_TRACK_B.md`](docs/WARRANT_TRACK_B.md) (judged) · [`docs/CONCORD_SHARED_STATE.md`](docs/CONCORD_SHARED_STATE.md) · [`docs/MIDDLEWARE_ARCHITECTURE.md`](docs/MIDDLEWARE_ARCHITECTURE.md) |
+| **Threat model** | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — implemented / partial / not-built, honestly labelled |
+| **Automated tests** | `npm run check` (typecheck + tests + build) · `npm run test:fuzz` · [`docs/TESTING.md`](docs/TESTING.md) |
+| **Demo steps** | `npm run demo:warrant` — the whole Track B story in the terminal, ~2s, no Ark key needed |
+| **Guided demo** | `./try.sh`, then follow the **Next** card in the workbench |
+| **Limitations** | [Track B §8](docs/WARRANT_TRACK_B.md#8-limitations-and-what-we-would-do-next) · [Track C §12](docs/MIDDLEWARE_ARCHITECTURE.md#12-residual-risks-and-limitations) · [`HANDOFF.md`](HANDOFF.md) §5a |
+| **Secrets** | None in the repository. `.env` is gitignored; [`.env.example`](.env.example) carries placeholders only. Bring your own `ARK_API_KEY`. |
+
+### The required denial, in one command
+
+```bash
+npm run demo:warrant
+```
+
+Alice's Agent asks to read Bob's workspace and is refused with
+`WB-6.cross-owner-denied`. Changing the user id in the request does not change
+the answer, because the id is never read from the request — it comes from the
+session token.
+
+
 ## Screenshots
 
 ### Agent Playground
